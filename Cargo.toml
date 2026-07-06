@@ -1,0 +1,33 @@
+# Cargo.toml
+[package]
+name = "oxy-glauber"
+version = "0.3.3"
+edition = "2024"
+authors = ["Constantin Loizides and others"]
+description = "Monte Carlo Glauber Model for Heavy-Ion Collisions - Rust port"
+license = "GPL-3.0"
+repository = "https://github.com/yourusername/oxy-glauber"
+
+[dependencies]
+oxyroot = "0.1.25"
+rand = "0.8"
+rand_distr = "0.4"
+num-traits = "0.2"
+anyhow = "1.0"
+thiserror = "1.0"
+serde = {version = "1.0.228", features = ["derive"] }
+
+[dev-dependencies]
+env_logger = "0.10"
+
+[[example]]
+name = "run_glauber"
+path = "examples/run_glauber.rs"
+
+[[example]]
+name = "run_save_ntuple"
+path = "examples/run_save_ntuple.rs"
+
+[[example]]
+name = "run_smear_ntuple"
+path = "examples/run_smear_ntuple.rs"
