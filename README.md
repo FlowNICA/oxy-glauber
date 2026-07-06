@@ -44,21 +44,24 @@ oxy-glauber = "0.3.3"
 
 Or clone the repository and build:
 ```bash
-git clone https://github.com/yourusername/oxy-glauber
+git clone https://github.com/FlowNICA/oxy-glauber
 cd oxy-glauber
 cargo build --release
 ```
 
-## Quick Start
+# Quick Start
 
-# Running the Examples
+## Running the Examples
 
 The simplest way to get started is to run the provided examples:
-```bash
-# Run with default parameters (Pb+Pb, 68 mb, 10000 events)
-cargo run --example run_save_ntuple
 
-# Run with custom parameters
+### Run with default parameters (Pb+Pb, 68 mb, 10000 events)
+```bash
+cargo run --example run_save_ntuple
+```
+
+### Run with custom parameters
+```bash
 cargo run --example run_save_ntuple -- \
     --nevents 5000 \
     --sysA Pb \
@@ -67,25 +70,31 @@ cargo run --example run_save_ntuple -- \
     --mind 0.4 \
     --omega 0.3 \
     --output my_output.root
+```
 
-# Run with energy instead of cross section (signn negative = energy in GeV)
+### Run with energy instead of cross section (signn negative = energy in GeV)
+```bash
 cargo run --example run_save_ntuple -- \
     --nevents 1000 \
     --signn -5360  # 5.36 TeV
+```
 
-# Run the smearing example
+### Run the smearing example
+```bash
 cargo run --example run_smear_ntuple -- \
     --nevents 1000 \
     --bmax 15.0
+```
 
-# Run the basic example with fewer branches
+### Run the basic example with fewer branches
+```bash
 cargo run --example run_glauber -- \
     --nevents 1000 \
     --sysA Pb \
     --sysB Pb
 ```
 
-# Command-line Options
+## Command-line Options
 
 All examples support the following common options:
 
@@ -106,18 +115,18 @@ Additional options for specific examples:
 - `run_glauber`: `--bmin`, `--bmax`
 - `run_smear_ntuple`: `--bmin`, `--bmax`
 
- ## Multi-Threading Support
+ # Multi-Threading Support
 
  Oxy-Glauber features automatic multi-threading support using the Rayon crate. This provides significant performance improvements for large event generation.
 
- # How It Works
+ ## How It Works
 - **Automatic detection**: When generating more than 10,000 events, the code automatically switches to parallel mode
 - **Maximum thread usage**: Uses all available CPU cores
 - **Even distribution**: Events are evenly distributed across threads
 - **Deterministic results**: Each thread uses a deterministic seed based on thread ID and event index
 - **Progress reporting**: Shows real-time progress with generation rate and elapsed time
 
-# Performance Example
+## Performance Example
 ```bash
 ╔════════════════════════════════════════════════════════════════╗
 ║                    PARALLEL EVENT GENERATION                   ║
@@ -142,7 +151,7 @@ Additional options for specific examples:
 ╚════════════════════════════════════════════════════════════════╝
 ```
 
-# Manual Thread Control
+## Manual Thread Control
 To manually control threading behavior:
 ```rust
 use oxy_glauber::TGlauberMC;
@@ -160,7 +169,7 @@ pool.install(|| {
 });
 ```
 
-# Single-Threaded Mode
+## Single-Threaded Mode
 For smaller event counts or debugging, the code runs in single-threaded mode:
 ```bash
 ╔════════════════════════════════════════════════════════════════╗
@@ -173,7 +182,7 @@ For smaller event counts or debugging, the code runs in single-threaded mode:
 ╚════════════════════════════════════════════════════════════════╝
 ```
 
-## Using as a Library
+# Using as a Library
 ```rust
 use oxy_glauber::TGlauberMC;
 
@@ -208,10 +217,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Supported Nuclei
+# Supported Nuclei
 See the `TGlauNucleus::lookup` function in the `src/nucleus.rs` for the complete list.
 
-## NN Profile Types
+# NN Profile Types
 The `omega` parameter controls the nucleon-nucleon interaction profile:
 
 | Omega value | Profile Type | Description |
@@ -222,7 +231,7 @@ The `omega` parameter controls the nucleon-nucleon interaction profile:
 | 8 |	PYTHIA | Based on PYTHIA model |
 | 9 - 11 |	TRENTO | w = omega - 9 |
 
-## Output Format
+# Output Format
 Results are written to ROOT files as TTrees with the following branches:
 - `Npart`, `Ncoll`, `Nhard`, `Nmpi`: Multiplicity and collision counters
 - `B`, `BNN`: Impact parameters
@@ -233,30 +242,32 @@ Results are written to ROOT files as TTrees with the following branches:
 - `Ecc1`-`Ecc5`: Eccentricities
 - `Psi1`-`Psi5`: Participant plane angles
 
-## Performance
+# Performance
 Oxy-Glauber leverages Rust's zero-cost abstractions and Rayon's work-stealing thread pool for excellent performance:
 | Events | Threads | Time (s) | Rate (events/sec) |
+|--------|---------|----------|-------------------|
 | 1,000 | 1 | 0.28 | ~3,605 |
 | 10,000 | 1 | 2.6 | ~3,896 |
 | 100,000 | 16 | 2.8 | ~35,719 |
 | 1,000,000 | 16 | 27.9 | ~35,838 |
+
 *Performance measured on an 16-core CPU with Au+Au collisions at the energy 2.4 GeV.*
 
-## References
+# References
 This implementation is based on the TGlauberMC C++ code:
 - TGlauberMC v3.3: https://tglaubermc.hepforge.org
 - "Glauber predictions for oxygen and neon collisions at the LHC", https://arxiv.org/abs/2507.05853
 - "Improved Monte Carlo Glauber predictions at present and future nuclear colliders", https://arxiv.org/abs/1710.07098
 - "Improved version of the PHOBOS Glauber Monte Carlo", https://arxiv.org/abs/1408.2549
 
-## License
+# License
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
 See the LICENSE file for details.
 
-## Contributing
+# Contributing
 Contributions are welcome! Please submit issues and pull requests on the GitHub repository.
 
-## Version
+# Version
 Current version: 0.3.3
 Based on TGlauberMC v3.3.2
