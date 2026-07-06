@@ -6,7 +6,7 @@ edition = "2024"
 authors = ["Constantin Loizides and others"]
 description = "Monte Carlo Glauber Model for Heavy-Ion Collisions - Rust port"
 license = "GPL-3.0"
-repository = "https://github.com/yourusername/oxy-glauber"
+repository = "https://github.com/FlowNICA/oxy-glauber"
 
 [dependencies]
 oxyroot = "0.1.25"
