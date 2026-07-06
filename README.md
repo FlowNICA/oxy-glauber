@@ -39,7 +39,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxy-glauber = "0.3.3"
+oxy-glauber = "0.3.4"
 ```
 
 Or clone the repository and build:
@@ -269,5 +269,5 @@ See the LICENSE file for details.
 Contributions are welcome! Please submit issues and pull requests on the GitHub repository.
 
 # Version
-Current version: 0.3.3
+Current version: 0.3.4
 Based on TGlauberMC v3.3.2
