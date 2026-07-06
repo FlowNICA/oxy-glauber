@@ -1,10 +1,9 @@
 // src/nucleus.rs
+#![allow(dead_code)]
 use crate::constants::{PI, TWO_PI};
 use crate::nucleon::{NucleonType, TGlauNucleon};
-use crate::random::RngExt;
 use rand::Rng;
 use rand::rngs::ThreadRng;
-use std::collections::HashMap;
 
 /// Nuclear density profile type
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -104,8 +103,10 @@ impl TGlauNucleus {
     }
 
     /// Lookup nucleus parameters by name
+    /// Based on the C++ TGlauNucleus::Lookup function
     fn lookup(&mut self, name: &str) {
         match name {
+            // Protons
             "p" | "pi" => {
                 self.n = 1;
                 self.z = 1;
@@ -124,6 +125,7 @@ impl TGlauNucleus {
                 self.r = 1.0;
                 self.profile_type = DensityProfile::ProtonDGaussian;
             }
+            // Deuteron
             "dpf" => {
                 self.n = 2;
                 self.z = 1;
@@ -145,6 +147,7 @@ impl TGlauNucleus {
                 self.a = 1.1765;
                 self.profile_type = DensityProfile::HulthenConstrained;
             }
+            // Light nuclei from files
             "He3" => {
                 self.n = 3;
                 self.z = 1;
@@ -165,6 +168,16 @@ impl TGlauNucleus {
                 self.z = 6;
                 self.profile_type = DensityProfile::FromFile;
             }
+            // Nitrogen
+            "Npar" => {
+                self.n = 14;
+                self.z = 7;
+                self.r = 2.570;
+                self.a = 0.0572;
+                self.w = -0.0180;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Oxygen
             "O" => {
                 self.n = 16;
                 self.z = 8;
@@ -179,11 +192,29 @@ impl TGlauNucleus {
                 self.max_r = 7.5;
                 self.profile_type = DensityProfile::WoodsSaxon3PF;
             }
+            "Opar2" => {
+                self.n = 16;
+                self.z = 8;
+                self.r = 1.850;
+                self.a = 0.497;
+                self.w = 0.912;
+                self.max_r = 7.5;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
             "Osat" => {
                 self.n = 16;
                 self.z = 8;
                 self.max_r = 7.5;
                 self.profile_type = DensityProfile::FromGraph;
+            }
+            "Odat" => {
+                self.n = 16;
+                self.z = 8;
+                self.r = 2.608;
+                self.a = 0.513;
+                self.w = -0.051;
+                self.max_r = 7.5;
+                self.profile_type = DensityProfile::Oxygen1970;
             }
             "Oho" => {
                 self.n = 16;
@@ -201,6 +232,7 @@ impl TGlauNucleus {
                 self.max_r = 7.5;
                 self.profile_type = DensityProfile::HarmonicOscillator;
             }
+            // Neon
             "Ne" => {
                 self.n = 20;
                 self.z = 10;
@@ -217,6 +249,36 @@ impl TGlauNucleus {
                 self.max_r = 8.5;
                 self.profile_type = DensityProfile::WoodsSaxon3PF;
             }
+            "Ne3" => {
+                self.n = 20;
+                self.z = 10;
+                self.r = 2.791;
+                self.a = 0.698;
+                self.w = -0.168;
+                self.max_r = 8.5;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "NeTr2" => {
+                self.n = 20;
+                self.z = 10;
+                self.r = 2.8;
+                self.a = 0.57;
+                self.beta2 = 0.721;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::DeformedTF2;
+            }
+            "NeTr3" => {
+                self.n = 20;
+                self.z = 10;
+                self.r = 2.7243;
+                self.a = 0.4982;
+                self.beta2 = 0.4899;
+                self.beta3 = 0.2160;
+                self.beta4 = 0.3055;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::DeformedBox;
+            }
+            // Aluminum
             "Al" => {
                 self.n = 27;
                 self.z = 13;
@@ -227,6 +289,66 @@ impl TGlauNucleus {
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::DeformedTF2;
             }
+            // Silicon
+            "Si" => {
+                self.n = 28;
+                self.z = 14;
+                self.r = 3.34;
+                self.a = 0.580;
+                self.w = -0.233;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Si2" => {
+                self.n = 28;
+                self.z = 14;
+                self.r = 3.34;
+                self.a = 0.580;
+                self.beta2 = -0.478;
+                self.beta4 = 0.250;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::DeformedTF2;
+            }
+            // Sulfur
+            "S" => {
+                self.n = 32;
+                self.z = 16;
+                self.r = 2.54;
+                self.a = 2.191;
+                self.w = 0.16;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PG;
+            }
+            // Argon
+            "Ar" => {
+                self.n = 40;
+                self.z = 18;
+                self.r = 3.53;
+                self.a = 0.542;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Calcium
+            "Ca" => {
+                self.n = 40;
+                self.z = 20;
+                self.r = 3.766;
+                self.a = 0.586;
+                self.w = -0.161;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Nickel
+            "Ni" => {
+                self.n = 58;
+                self.z = 28;
+                self.r = 4.309;
+                self.a = 0.517;
+                self.w = -0.1308;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Copper
             "Cu" => {
                 self.n = 63;
                 self.z = 29;
@@ -234,6 +356,14 @@ impl TGlauNucleus {
                 self.a = 0.596;
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Curw" => {
+                self.n = 63;
+                self.z = 29;
+                self.r = 4.20;
+                self.a = 0.596;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::Reweighted;
             }
             "Cu2" => {
                 self.n = 63;
@@ -245,6 +375,394 @@ impl TGlauNucleus {
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::DeformedTF2;
             }
+            "Cu2rw" => {
+                self.n = 63;
+                self.z = 29;
+                self.r = 4.20;
+                self.a = 0.596;
+                self.beta2 = 0.162;
+                self.beta4 = -0.006;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::DeformedReweighted;
+            }
+            "CuHN" => {
+                self.n = 63;
+                self.z = 29;
+                self.r = 4.28;
+                self.a = 0.5;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Niobium
+            "Nb93LB" => {
+                self.n = 93;
+                self.z = 41;
+                self.r = 4.9853;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Zirconium
+            "Zr96LB" => {
+                self.n = 96;
+                self.z = 40;
+                self.r = 5.0212;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Ruthenium
+            "Ru96LB" => {
+                self.n = 96;
+                self.z = 44;
+                self.r = 5.0845;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Silver
+            "Ag107LB" => {
+                self.n = 107;
+                self.z = 47;
+                self.r = 5.3006;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Ag109LB" => {
+                self.n = 109;
+                self.z = 47;
+                self.r = 5.3306;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Ag107pn" => {
+                self.n = 107;
+                self.z = 47;
+                self.r = 5.2731;
+                self.a = 0.4749;
+                self.r2 = 5.4262;
+                self.a2 = 0.4776;
+                self.profile_type = DensityProfile::ProtonNeutron3PF;
+            }
+            "Ag109pn" => {
+                self.n = 109;
+                self.z = 47;
+                self.r = 5.2943;
+                self.a = 0.4729;
+                self.r2 = 5.4762;
+                self.a2 = 0.4788;
+                self.profile_type = DensityProfile::ProtonNeutron3PF;
+            }
+            "Ag107pnHFB14" => {
+                self.n = 107;
+                self.z = 47;
+                self.r = 5.2875;
+                self.a = 0.4788;
+                self.r2 = 5.287;
+                self.a2 = 0.5498;
+                self.profile_type = DensityProfile::ProtonNeutron3PF;
+            }
+            "Ag109pnHFB14" => {
+                self.n = 109;
+                self.z = 47;
+                self.r = 5.3160;
+                self.a = 0.4776;
+                self.r2 = 5.3246;
+                self.a2 = 0.5593;
+                self.profile_type = DensityProfile::ProtonNeutron3PF;
+            }
+            // Tin stable isotopes
+            "Sn112" => {
+                self.n = 112;
+                self.z = 50;
+                self.r = 5.3714;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn114" => {
+                self.n = 114;
+                self.z = 50;
+                self.r = 5.3943;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn116" => {
+                self.n = 116;
+                self.z = 50;
+                self.r = 5.4173;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn117" => {
+                self.n = 117;
+                self.z = 50;
+                self.r = 5.1241;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn118" => {
+                self.n = 118;
+                self.z = 50;
+                self.r = 5.4391;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn119" => {
+                self.n = 119;
+                self.z = 50;
+                self.r = 5.4431;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn120" => {
+                self.n = 120;
+                self.z = 50;
+                self.r = 5.4588;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn122" => {
+                self.n = 122;
+                self.z = 50;
+                self.r = 5.4761;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn124" => {
+                self.n = 124;
+                self.z = 50;
+                self.r = 5.4907;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Tin with pr3 parametrization (handled as a group)
+            name if name.starts_with("Sn") && name.ends_with("pr3") => {
+                let (n_val, r_val, a_val, w_val) = match name {
+                    "Sn112pr3" => (112, 4.962, 2.638 / (4.0 * 3.0_f64.ln()), 0.285),
+                    "Sn114pr3" => (114, 4.971, 2.636 / (4.0 * 3.0_f64.ln()), 0.320),
+                    "Sn116pr3" => (116, 5.062, 2.625 / (4.0 * 3.0_f64.ln()), 0.272),
+                    "Sn117pr3" => (117, 5.058, 2.625 / (4.0 * 3.0_f64.ln()), 0.295),
+                    "Sn118pr3" => (118, 5.072, 2.623 / (4.0 * 3.0_f64.ln()), 0.304),
+                    "Sn119pr3" => (119, 5.100, 2.618 / (4.0 * 3.0_f64.ln()), 0.290),
+                    "Sn120pr3" => (120, 5.110, 2.619 / (4.0 * 3.0_f64.ln()), 0.292),
+                    "Sn122pr3" => (122, 5.088, 2.611 / (4.0 * 3.0_f64.ln()), 0.378),
+                    "Sn124pr3" => (124, 5.150, 2.615 / (4.0 * 3.0_f64.ln()), 0.311),
+                    _ => (0, 0.0, 0.0, 0.0),
+                };
+                self.n = n_val;
+                self.z = 50;
+                self.r = r_val;
+                self.a = a_val;
+                self.w = w_val;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Tin non-stable isotopes
+            "Sn108" => {
+                self.n = 108;
+                self.z = 50;
+                self.r = 5.3274;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Sn132" => {
+                self.n = 132;
+                self.z = 50;
+                self.r = 5.5387;
+                self.a = 0.5234;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Iodine
+            "I" => {
+                self.n = 127;
+                self.z = 53;
+                self.r = 5.66;
+                self.a = 0.54;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "IHS" => {
+                self.n = 127;
+                self.z = 53;
+                self.r = 5.66;
+                self.a = 0.00001;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Xenon
+            "Xe" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.59;
+                self.max_r = 10.72;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "XeDef" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.54;
+                self.max_r = 10.72;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "XeDef2" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.26;
+                self.a = 0.54;
+                self.max_r = 10.72;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "XeDef3" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.46;
+                self.a = 0.54;
+                self.max_r = 10.72;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "XeDef4" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.59;
+                self.max_r = 10.72;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "XeDef5" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.49;
+                self.max_r = 10.72;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "XeDCM" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.336;
+                self.a = 0.545;
+                self.max_r = 6.94;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Xes" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.42;
+                self.a = 0.57;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Xe2" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.59;
+                self.beta2 = 0.161;
+                self.beta4 = -0.003;
+                self.profile_type = DensityProfile::DeformedTF2;
+            }
+            "Xe2a" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.59;
+                self.beta2 = 0.18;
+                self.beta4 = 0.0;
+                self.profile_type = DensityProfile::DeformedTF2;
+            }
+            "Xerw" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.59;
+                self.profile_type = DensityProfile::Reweighted;
+            }
+            "Xesrw" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.42;
+                self.a = 0.57;
+                self.profile_type = DensityProfile::Reweighted;
+            }
+            "Xe2arw" => {
+                self.n = 129;
+                self.z = 54;
+                self.r = 5.36;
+                self.a = 0.59;
+                self.beta2 = 0.18;
+                self.beta4 = 0.0;
+                self.profile_type = DensityProfile::DeformedReweighted;
+            }
+            "Xe124" => {
+                self.n = 124;
+                self.z = 54;
+                self.r = 5.431;
+                self.a = 0.5978;
+                self.beta2 = 0.212;
+                self.beta4 = -0.018;
+                self.profile_type = DensityProfile::DeformedTF2;
+            }
+            "Xe124HS" => {
+                self.n = 124;
+                self.z = 54;
+                self.r = 5.431;
+                self.a = 0.00001;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Cesium
+            "CsI" => {
+                self.n = 130;
+                self.z = 54;
+                self.r = 5.71;
+                self.a = 0.54;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "CsIHS" => {
+                self.n = 130;
+                self.z = 54;
+                self.r = 5.71;
+                self.a = 0.00001;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Cs" => {
+                self.n = 133;
+                self.z = 55;
+                self.r = 5.76;
+                self.a = 0.54;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "CsHS" => {
+                self.n = 133;
+                self.z = 55;
+                self.r = 5.76;
+                self.a = 0.00001;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Tungsten
+            "W184" => {
+                self.n = 184;
+                self.z = 74;
+                self.r = 6.52;
+                self.a = 0.535;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "W184LB" => {
+                self.n = 184;
+                self.z = 74;
+                self.r = 6.3599;
+                self.a = 0.523;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "W" => {
+                self.n = 186;
+                self.z = 74;
+                self.r = 6.58;
+                self.a = 0.480;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "W186LB" => {
+                self.n = 186;
+                self.z = 74;
+                self.r = 6.3839;
+                self.a = 0.523;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            // Gold
             "Au" => {
                 self.n = 197;
                 self.z = 79;
@@ -253,11 +771,97 @@ impl TGlauNucleus {
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::WoodsSaxon3PF;
             }
+            "Aurw" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.38;
+                self.a = 0.535;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::Reweighted;
+            }
+            "Au2" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.38;
+                self.a = 0.535;
+                self.beta2 = -0.131;
+                self.beta4 = -0.031;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::DeformedTF2;
+            }
+            "Au2rw" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.38;
+                self.a = 0.535;
+                self.beta2 = -0.131;
+                self.beta4 = -0.031;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::DeformedReweighted;
+            }
+            "AuHN" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.42;
+                self.a = 0.44;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Au197LB" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.5541;
+                self.a = 0.523;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Au4pn" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.538;
+                self.a = 0.465;
+                self.r2 = 6.794;
+                self.a2 = 0.483;
+                self.profile_type = DensityProfile::ProtonNeutron3PF;
+            }
+            "Au197pnHFB14" => {
+                self.n = 197;
+                self.z = 79;
+                self.r = 6.5831;
+                self.a = 0.4628;
+                self.r2 = 6.6604;
+                self.a2 = 0.5464;
+                self.profile_type = DensityProfile::ProtonNeutron3PF;
+            }
+            // Lead
             "Pb" => {
                 self.n = 208;
                 self.z = 82;
                 self.r = 6.62;
                 self.a = 0.546;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "Pbrw" => {
+                self.n = 208;
+                self.z = 82;
+                self.r = 6.62;
+                self.a = 0.546;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::Reweighted;
+            }
+            "Pb*" => {
+                self.n = 208;
+                self.z = 82;
+                self.r = 6.624;
+                self.a = 0.549;
+                self.max_r = 10.0;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "PbHN" => {
+                self.n = 208;
+                self.z = 82;
+                self.r = 6.65;
+                self.a = 0.460;
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::WoodsSaxon3PF;
             }
@@ -281,6 +885,23 @@ impl TGlauNucleus {
                 self.smax = 0.1;
                 self.profile_type = DensityProfile::ProtonNeutronReweighted;
             }
+            // Bismuth
+            "Bi" => {
+                self.n = 209;
+                self.z = 83;
+                self.r = 6.75;
+                self.a = 0.468;
+                self.profile_type = DensityProfile::WoodsSaxon3PF;
+            }
+            "BiGS" => {
+                self.n = 209;
+                self.z = 83;
+                self.r = 6.315;
+                self.a = 2.881;
+                self.w = 0.39;
+                self.profile_type = DensityProfile::WoodsSaxon3PG;
+            }
+            // Uranium
             "U" => {
                 self.n = 238;
                 self.z = 92;
@@ -300,12 +921,15 @@ impl TGlauNucleus {
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::DeformedTF2;
             }
-            _ if name.starts_with("TR_") => {
+            // Trajectum models (needs libtrnucgen)
+            name if name.starts_with("TR_") => {
                 self.profile_type = DensityProfile::Trajectum;
             }
-            _ if name.starts_with("input") => {
+            // Input from file
+            name if name.starts_with("input") => {
                 self.profile_type = DensityProfile::FromFile;
             }
+            // Unknown nucleus
             _ => {
                 eprintln!("Warning: Could not find nucleus {} in lookup table", name);
             }
@@ -402,7 +1026,7 @@ impl TGlauNucleus {
         self.y_rot = rng.r#gen::<f64>() * TWO_PI;
         self.z_rot = rng.r#gen::<f64>() * TWO_PI;
 
-        let is_hulthen = matches!(
+        let _is_hulthen = matches!(
             self.profile_type,
             DensityProfile::Hulthen | DensityProfile::HulthenConstrained
         );

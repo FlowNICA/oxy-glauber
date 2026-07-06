@@ -108,7 +108,7 @@ impl NNProfile {
                     return 0.0;
                 }
                 let r2 = self.sigma_nn * MB_TO_FM2 / PI;
-                let alpha = 1.0 / self.omega;
+                let _alpha = 1.0 / self.omega;
                 let beta = self.g / (self.omega * r2);
                 let arg = beta * b2;
                 // Incomplete gamma function approximation

@@ -1,9 +1,8 @@
 // src/glauber.rs
-use crate::constants::{MB_TO_FM2, PI, TWO_PI};
+use crate::constants::{MB_TO_FM2, PI};
 use crate::cross_section::CrossSection;
-use crate::nucleon::{NucleonType, TGlauNucleon};
 use crate::nucleus::TGlauNucleus;
-use crate::profile::{NNProfile, NNProfileType, profile_from_omega};
+use crate::profile::{NNProfile, profile_from_omega};
 use rand::Rng;
 use rand::rngs::ThreadRng;
 
@@ -129,10 +128,8 @@ impl Default for TGlauberEvent {
 pub struct TGlauberMC {
     nucleus_a: TGlauNucleus,
     nucleus_b: TGlauNucleus,
-    xsect: f64,       // NN cross section in mb
-    xsect_np: f64,    // PN cross section in mb
-    xsect_omega: f64, // Sigma fluctuation
-    xsect_event: f64, // Event cross section
+    xsect: f64,    // NN cross section in mb
+    xsect_np: f64, // PN cross section in mb
     bmin: f64,
     bmax: f64,
     hard_frac: f64,
@@ -140,9 +137,7 @@ pub struct TGlauberMC {
     calc_area: bool,
     calc_length: bool,
     do_core: bool,
-    do_aagg: bool,
     sig_h: f64,
-    shadow: bool,
     omega: f64,
     max_npart_found: i32,
     two_c_x: f64,
@@ -150,9 +145,7 @@ pub struct TGlauberMC {
     total_events: f64,
     nn_profile: Option<NNProfile>,
     event: TGlauberEvent,
-    // Collision matrix
     bc: Vec<Vec<bool>>,
-    mpi: [i32; 100],
 }
 
 impl TGlauberMC {
@@ -173,13 +166,18 @@ impl TGlauberMC {
             );
         }
 
-        let mut mcg = Self {
+        if xsect_sigma > 0.0 {
+            println!(
+                "Using fluctuating cross section with sigma={:.1} mb",
+                xsect_sigma
+            );
+        }
+
+        Self {
             nucleus_a: TGlauNucleus::new(na),
             nucleus_b: TGlauNucleus::new(nb),
             xsect: xsect_use,
             xsect_np: xsect_np_use,
-            xsect_omega: xsect_sigma,
-            xsect_event: xsect_use,
             bmin: 0.0,
             bmax: 20.0,
             hard_frac: 0.65,
@@ -187,9 +185,7 @@ impl TGlauberMC {
             calc_area: false,
             calc_length: false,
             do_core: false,
-            do_aagg: true,
             sig_h,
-            shadow: false,
             omega: -1.0,
             max_npart_found: 0,
             two_c_x: 0.0,
@@ -198,17 +194,7 @@ impl TGlauberMC {
             nn_profile: None,
             event: TGlauberEvent::default(),
             bc: Vec::new(),
-            mpi: [0; 100],
-        };
-
-        if xsect_sigma > 0.0 {
-            println!(
-                "Using fluctuating cross section with sigma={:.1} mb",
-                xsect_sigma
-            );
         }
-
-        mcg
     }
 
     pub fn with_profile(mut self, profile: NNProfile) -> Self {
@@ -399,13 +385,10 @@ impl TGlauberMC {
 
         let mut nc = 0;
         let mut nh = 0;
-        let mut njet = 0;
         let mut bnn_sum = 0.0;
         let mut x0 = 0.0;
         let mut y0 = 0.0;
         let mut first_collision = true;
-
-        self.mpi = [0; 100];
 
         let d2pp = self.xsect * MB_TO_FM2 / PI;
         let d2np = if self.xsect_np > 0.0 {
@@ -508,18 +491,17 @@ impl TGlauberMC {
         self.event.bnn = (bnn_sum / nc as f64) as f32;
         self.event.ncoll = nc as f32;
         self.event.nhard = nh as f32;
-        self.event.nmpi = njet as f32;
         self.event.x0 = x0 as f32;
         self.event.y0 = y0 as f32;
 
         // Calculate participant information
-        self.calc_participants(rng);
+        self.calc_participants();
 
         true
     }
 
     /// Calculate participant quantities
-    fn calc_participants(&mut self, _rng: &mut ThreadRng) {
+    fn calc_participants(&mut self) {
         let nucleons_a = self.nucleus_a.nucleons();
         let nucleons_b = self.nucleus_b.nucleons();
 

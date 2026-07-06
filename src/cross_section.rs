@@ -1,7 +1,4 @@
 // src/cross_section.rs
-use crate::constants::MB_TO_FM2;
-use std::f64::consts::PI;
-
 /// Cross section utilities
 pub struct CrossSection;
 
@@ -22,10 +19,9 @@ impl CrossSection {
             return 0.0;
         }
         // Interpolated from Bystricky table
-        // Simplified parameterization
         let x = energy;
         if x < 0.5 {
-            0.0 // Rough approximation
+            0.0
         } else if x < 1.0 {
             10.0 * (x - 0.5) + 3.0
         } else if x < 2.0 {
@@ -42,7 +38,6 @@ impl CrossSection {
         if energy < 0.28 || energy > 425.0 {
             return 0.0;
         }
-        // Interpolated from Bystricky table
         let x = energy;
         if x < 0.5 {
             5.0 * (x - 0.28) / 0.22
@@ -68,8 +63,6 @@ impl CrossSection {
         if energy < 10.0 {
             return 0.0;
         }
-        // From HIJING parameterization
-        // Simplified approximation
         if energy < 100.0 {
             0.01 * (energy - 10.0)
         } else if energy < 1000.0 {
