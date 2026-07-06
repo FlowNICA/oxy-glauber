@@ -3,7 +3,6 @@
 use crate::constants::{PI, TWO_PI};
 use crate::nucleon::{NucleonType, TGlauNucleon};
 use rand::Rng;
-use rand::rngs::ThreadRng;
 
 /// Nuclear density profile type
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,35 +32,35 @@ pub enum DensityProfile {
 #[derive(Debug, Clone)]
 pub struct TGlauNucleus {
     name: String,
-    n: i32,         // Number of nucleons
-    z: i32,         // Number of protons
-    r: f64,         // Radius of the 3pF function
-    a: f64,         // Thickness of the 3pF function
-    w: f64,         // Shape parameter of the 3pF function
-    r2: f64,        // Radius for neutron distribution
-    a2: f64,        // Thickness for neutron distribution
-    w2: f64,        // Shape parameter for neutron distribution
-    beta2: f64,     // Beta2 deformation
-    beta3: f64,     // Beta3 deformation
-    beta4: f64,     // Beta4 deformation
-    gamma: f64,     // Gamma deformation
-    min_dist: f64,  // Minimum separation distance
-    node_dist: f64, // Average node distance (≤0 for continuous)
-    smearing: f64,  // Node smearing
-    recenter: i32, // Recentering method (0=none, 1=all, 2=displace one, 3=rotate+shift, 4=rotate only, 5=transverse)
-    lattice: i32,  // Lattice type (0=HCP, 1=PCS, 2=BCC, 3=FCC)
-    smax: f64,     // Maximum magnitude of cms shift tolerated
+    n: i32,
+    z: i32,
+    r: f64,
+    a: f64,
+    w: f64,
+    r2: f64,
+    a2: f64,
+    w2: f64,
+    beta2: f64,
+    beta3: f64,
+    beta4: f64,
+    gamma: f64,
+    min_dist: f64,
+    node_dist: f64,
+    smearing: f64,
+    recenter: i32,
+    lattice: i32,
+    smax: f64,
     profile_type: DensityProfile,
-    trials: i32,      // Number of trials needed to complete nucleus
-    non_smeared: i32, // Number of non-smeared-node nucleons
-    weight: f64,      // Weight of nucleus
+    trials: i32,
+    non_smeared: i32,
+    weight: f64,
     nucleons: Vec<TGlauNucleon>,
     phi_rot: f64,
     theta_rot: f64,
     x_rot: f64,
     y_rot: f64,
     z_rot: f64,
-    max_r: f64, // Maximum radius
+    max_r: f64,
 }
 
 impl TGlauNucleus {
@@ -103,7 +102,6 @@ impl TGlauNucleus {
     }
 
     /// Lookup nucleus parameters by name
-    /// Based on the C++ TGlauNucleus::Lookup function
     fn lookup(&mut self, name: &str) {
         match name {
             // Protons
@@ -532,7 +530,7 @@ impl TGlauNucleus {
                 self.a = 0.5234;
                 self.profile_type = DensityProfile::WoodsSaxon3PF;
             }
-            // Tin with pr3 parametrization (handled as a group)
+            // Tin with pr3 parametrization
             name if name.starts_with("Sn") && name.ends_with("pr3") => {
                 let (n_val, r_val, a_val, w_val) = match name {
                     "Sn112pr3" => (112, 4.962, 2.638 / (4.0 * 3.0_f64.ln()), 0.285),
@@ -921,7 +919,7 @@ impl TGlauNucleus {
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::DeformedTF2;
             }
-            // Trajectum models (needs libtrnucgen)
+            // Trajectum models
             name if name.starts_with("TR_") => {
                 self.profile_type = DensityProfile::Trajectum;
             }
@@ -953,7 +951,7 @@ impl TGlauNucleus {
     }
 
     /// Randomize the types of nucleons
-    fn randomize_nucleons(&mut self, rng: &mut ThreadRng) {
+    fn randomize_nucleons<R: Rng>(&mut self, rng: &mut R) {
         let mut iz = 0;
         for i in 0..self.n as usize {
             let frac = (self.z - iz) as f64 / (self.n - i as i32) as f64;
@@ -965,24 +963,6 @@ impl TGlauNucleus {
                 self.nucleons[i].set_type(NucleonType::Neutron);
             }
         }
-    }
-
-    /// Test if a nucleon is within the minimum distance of existing nucleons
-    fn test_min_dist(&self, n: usize, x: f64, y: f64, z: f64) -> bool {
-        if self.min_dist <= 0.0 {
-            return true;
-        }
-        let md2 = self.min_dist * self.min_dist;
-        for j in 0..n {
-            let other = &self.nucleons[j];
-            let dx = x - other.x();
-            let dy = y - other.y();
-            let dz = z - other.z();
-            if dx * dx + dy * dy + dz * dz < md2 {
-                return false;
-            }
-        }
-        true
     }
 
     /// Woods-Saxon density evaluation
@@ -997,14 +977,14 @@ impl TGlauNucleus {
     }
 
     /// Generate random radius from Woods-Saxon distribution (rejection sampling)
-    fn random_woods_saxon(&self, rng: &mut ThreadRng) -> f64 {
+    fn random_woods_saxon<R: Rng>(&self, rng: &mut R) -> f64 {
         const MAX_TRIALS: usize = 10000;
         for _ in 0..MAX_TRIALS {
             let r = rng.r#gen_range(0.0..self.max_r);
             let rho = self.woods_saxon_radius(r);
             let r2 = r * r;
             let weight = rho * r2;
-            let max_weight = self.max_r * self.max_r * 1.0; // Approximate
+            let max_weight = self.max_r * self.max_r * 1.0;
             if rng.r#gen::<f64>() * max_weight < weight {
                 return r;
             }
@@ -1013,7 +993,7 @@ impl TGlauNucleus {
     }
 
     /// Throw nucleons according to the density profile
-    pub fn throw_nucleons(&mut self, xshift: f64, rng: &mut ThreadRng) -> [f64; 3] {
+    pub fn throw_nucleons<R: Rng>(&mut self, xshift: f64, rng: &mut R) -> [f64; 3] {
         self.allocate_nucleons();
         self.randomize_nucleons(rng);
 
@@ -1025,11 +1005,6 @@ impl TGlauNucleus {
         self.x_rot = rng.r#gen::<f64>() * TWO_PI;
         self.y_rot = rng.r#gen::<f64>() * TWO_PI;
         self.z_rot = rng.r#gen::<f64>() * TWO_PI;
-
-        let _is_hulthen = matches!(
-            self.profile_type,
-            DensityProfile::Hulthen | DensityProfile::HulthenConstrained
-        );
 
         // Store nucleon positions temporarily to avoid borrowing issues
         let mut positions: Vec<(f64, f64, f64)> = Vec::with_capacity(self.n as usize);
@@ -1143,7 +1118,6 @@ impl TGlauNucleus {
         for (i, (x, y, z)) in positions.into_iter().enumerate() {
             if i < self.nucleons.len() {
                 self.nucleons[i].set_position(x, y, z);
-                // Apply rotation for deformed nuclei
                 if matches!(
                     self.profile_type,
                     DensityProfile::Ellipsoid
@@ -1170,7 +1144,6 @@ impl TGlauNucleus {
 
         let shift_mag = (sumx * sumx + sumy * sumy + sumz * sumz).sqrt();
         if shift_mag > self.smax {
-            // Retry if shift is too large - use recursion but with a limit
             return self.throw_nucleons(xshift, rng);
         }
 
