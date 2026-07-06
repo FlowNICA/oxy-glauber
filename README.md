@@ -1,6 +1,6 @@
 # Oxy-Glauber
 
-[![Crates.io](https://img.shields.io/crates/v/oxy-glauber.svg)](https://crates.io/crates/oxy-glauber)
+[![Crates.io](https://img.shields.io/crates/v/oxy-glauber.svg)]([https://crates.io/crates/oxy-glauber](https://crates.io/crates/oxy-glauber/0.3.3))
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 A Rust implementation of the Monte Carlo Glauber Model for Heavy-Ion Collisions, based on the [TGlauberMC v3.3.2](https://tglaubermc.hepforge.org) C++ code.
