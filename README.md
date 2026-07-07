@@ -5,6 +5,8 @@
 
 A Rust implementation of the Monte Carlo Glauber Model for Heavy-Ion Collisions, based on the [TGlauberMC v3.3.2](https://tglaubermc.hepforge.org) C++ code.
 
+**NOTE**: this is a very early version, written with AI-assisted tools. It is not ready to be used in a proper analysis. Bug fixes are in progress.
+
 ## Overview
 
 Oxy-Glauber simulates the geometry of nuclear collisions and calculates quantities like:
