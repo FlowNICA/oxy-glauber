@@ -161,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Output: {}", output);
     println!();
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let mut glauber = TGlauberMC::new(&sys_a, &sys_b, signn, 0.0, 0.0);
     glauber.set_min_distance(mind);

@@ -1,8 +1,8 @@
 // src/nucleus.rs
-#![allow(dead_code)]
 use crate::constants::{PI, TWO_PI};
 use crate::nucleon::{NucleonType, TGlauNucleon};
 use rand::Rng;
+use rand::RngExt;
 
 /// Nuclear density profile type
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,6 +61,14 @@ pub struct TGlauNucleus {
     y_rot: f64,
     z_rot: f64,
     max_r: f64,
+    // For reweighted profiles
+    r0: f64,
+    r1: f64,
+    r2_factor: f64,
+    // Cached rejection-sampling envelopes (max of rho(r)*r^2 over [0, max_r]), -1.0 = uncached
+    density_env_p: f64,
+    density_env_n: f64,
+    density_env_deformed: f64,
 }
 
 impl TGlauNucleus {
@@ -96,6 +104,12 @@ impl TGlauNucleus {
             y_rot: 0.0,
             z_rot: 0.0,
             max_r: 15.0,
+            r0: 0.0,
+            r1: 0.0,
+            r2_factor: 0.0,
+            density_env_p: -1.0,
+            density_env_n: -1.0,
+            density_env_deformed: -1.0,
         };
         nucleus.lookup(name);
         nucleus
@@ -273,6 +287,7 @@ impl TGlauNucleus {
                 self.beta2 = 0.4899;
                 self.beta3 = 0.2160;
                 self.beta4 = 0.3055;
+                self.gamma = 0.0;
                 self.max_r = 10.0;
                 self.profile_type = DensityProfile::DeformedBox;
             }
@@ -361,6 +376,9 @@ impl TGlauNucleus {
                 self.r = 4.20;
                 self.a = 0.596;
                 self.max_r = 10.0;
+                self.r0 = 1.00898;
+                self.r1 = -0.000790403;
+                self.r2_factor = -0.000389897;
                 self.profile_type = DensityProfile::Reweighted;
             }
             "Cu2" => {
@@ -381,6 +399,9 @@ impl TGlauNucleus {
                 self.beta2 = 0.162;
                 self.beta4 = -0.006;
                 self.max_r = 10.0;
+                self.r0 = 1.01269;
+                self.r1 = -0.00298083;
+                self.r2_factor = -9.97222e-05;
                 self.profile_type = DensityProfile::DeformedReweighted;
             }
             "CuHN" => {
@@ -668,6 +689,9 @@ impl TGlauNucleus {
                 self.z = 54;
                 self.r = 5.36;
                 self.a = 0.59;
+                self.r0 = 1.00911;
+                self.r1 = -0.000722999;
+                self.r2_factor = -0.0002663;
                 self.profile_type = DensityProfile::Reweighted;
             }
             "Xesrw" => {
@@ -675,6 +699,9 @@ impl TGlauNucleus {
                 self.z = 54;
                 self.r = 5.42;
                 self.a = 0.57;
+                self.r0 = 1.0096;
+                self.r1 = -0.000874123;
+                self.r2_factor = -0.000256708;
                 self.profile_type = DensityProfile::Reweighted;
             }
             "Xe2arw" => {
@@ -684,6 +711,9 @@ impl TGlauNucleus {
                 self.a = 0.59;
                 self.beta2 = 0.18;
                 self.beta4 = 0.0;
+                self.r0 = 1.01246;
+                self.r1 = -0.0024851;
+                self.r2_factor = -5.72464e-05;
                 self.profile_type = DensityProfile::DeformedReweighted;
             }
             "Xe124" => {
@@ -775,6 +805,9 @@ impl TGlauNucleus {
                 self.r = 6.38;
                 self.a = 0.535;
                 self.max_r = 10.0;
+                self.r0 = 1.00899;
+                self.r1 = -0.000590908;
+                self.r2_factor = -0.000210598;
                 self.profile_type = DensityProfile::Reweighted;
             }
             "Au2" => {
@@ -795,6 +828,9 @@ impl TGlauNucleus {
                 self.beta2 = -0.131;
                 self.beta4 = -0.031;
                 self.max_r = 10.0;
+                self.r0 = 1.01261;
+                self.r1 = -0.00225517;
+                self.r2_factor = -3.71513e-05;
                 self.profile_type = DensityProfile::DeformedReweighted;
             }
             "AuHN" => {
@@ -845,6 +881,9 @@ impl TGlauNucleus {
                 self.r = 6.62;
                 self.a = 0.546;
                 self.max_r = 10.0;
+                self.r0 = 1.00863;
+                self.r1 = -0.00044808;
+                self.r2_factor = -0.000205872;
                 self.profile_type = DensityProfile::Reweighted;
             }
             "Pb*" => {
@@ -881,6 +920,9 @@ impl TGlauNucleus {
                 self.a2 = 0.56;
                 self.recenter = 1;
                 self.smax = 0.1;
+                self.r0 = 1.00866;
+                self.r1 = -0.000461484;
+                self.r2_factor = -0.000203571;
                 self.profile_type = DensityProfile::ProtonNeutronReweighted;
             }
             // Bismuth
@@ -955,7 +997,7 @@ impl TGlauNucleus {
         let mut iz = 0;
         for i in 0..self.n as usize {
             let frac = (self.z - iz) as f64 / (self.n - i as i32) as f64;
-            let rn: f64 = rng.r#gen();
+            let rn: f64 = rng.random();
             if rn < frac {
                 self.nucleons[i].set_type(NucleonType::Proton);
                 iz += 1;
@@ -965,31 +1007,236 @@ impl TGlauNucleus {
         }
     }
 
-    /// Woods-Saxon density evaluation
-    fn woods_saxon_radius(&self, r: f64) -> f64 {
-        let r = r.abs();
-        if r > self.max_r {
-            return 0.0;
+    /// Test if a nucleon is within the minimum distance of existing nucleons
+    #[allow(dead_code)]
+    fn test_min_dist(&self, n: usize, x: f64, y: f64, z: f64) -> bool {
+        if self.min_dist <= 0.0 {
+            return true;
         }
-        let w_term = 1.0 + self.w * (r / self.r).powi(2);
-        let denom = 1.0 + ((r - self.r) / self.a).exp();
+        let md2 = self.min_dist * self.min_dist;
+        for j in 0..n {
+            let other = &self.nucleons[j];
+            let dx = x - other.x();
+            let dy = y - other.y();
+            let dz = z - other.z();
+            if dx * dx + dy * dy + dz * dz < md2 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Woods-Saxon 3-parameter Fermi density (unnormalized), matching McGlauber fF=1 (3pF):
+    /// rho(r) = (1 + w*(r/R)^2) / (1 + exp((r-R)/a))
+    fn woods_saxon_3pf(r: f64, r_param: f64, a_param: f64, w_param: f64) -> f64 {
+        let w_term = 1.0 + w_param * (r / r_param).powi(2);
+        let denom = 1.0 + ((r - r_param) / a_param).exp();
         w_term / denom
     }
 
-    /// Generate random radius from Woods-Saxon distribution (rejection sampling)
-    fn random_woods_saxon<R: Rng>(&self, rng: &mut R) -> f64 {
-        const MAX_TRIALS: usize = 10000;
+    /// Woods-Saxon 3-parameter Gaussian density (unnormalized), matching McGlauber fF=2 (3pG):
+    /// rho(r) = (1 + w*(r/R)^2) / (1 + exp((r^2-R^2)/a^2))
+    fn woods_saxon_3pg(r: f64, r_param: f64, a_param: f64, w_param: f64) -> f64 {
+        let w_term = 1.0 + w_param * (r / r_param).powi(2);
+        let denom = 1.0 + ((r * r - r_param * r_param) / (a_param * a_param)).exp();
+        w_term / denom
+    }
+
+    /// Hulthen deuteron density (unnormalized), matching McGlauber fF=3/4:
+    /// rho(r) = R*a*(R+a) / (2*pi*(R-a)^2) * ((exp(-R*r)-exp(-a*r))/r)^2
+    fn hulthen_density(r: f64, r_param: f64, a_param: f64) -> f64 {
+        if r <= 0.0 {
+            return 0.0;
+        }
+        let diff = (-r_param * r).exp() - (-a_param * r).exp();
+        let norm = r_param * a_param * (r_param + a_param) / (2.0 * PI * (r_param - a_param).powi(2));
+        norm * (diff / r).powi(2)
+    }
+
+    /// Harmonic oscillator density (unnormalized), matching McGlauber fF=15:
+    /// rho(r) = (1 + coeff*(r/scale)^2) * exp(-(r/scale)^2)
+    /// Note: McGlauber sets par[0]=fR as the coefficient and par[1]=fA as the length scale.
+    fn harmonic_oscillator_density(r: f64, coeff: f64, scale: f64) -> f64 {
+        let x = r / scale;
+        (1.0 + coeff * x * x) * (-x * x).exp()
+    }
+
+    /// Oxygen-1970 parameterization (unnormalized), matching McGlauber fF=16:
+    /// rho(r) = (1 - 0.102*sin(2.76r)*exp(-(0.35r)^2)/(2.76r) + w*(r/R)^2) / (1 + exp((r-R)/a))
+    fn oxygen_1970_density(r: f64, r_param: f64, a_param: f64, w_param: f64) -> f64 {
+        let osc = if r.abs() < 1e-12 {
+            0.102
+        } else {
+            0.102 * (2.76 * r).sin() / (2.76 * r) * (-(0.35 * r).powi(2)).exp()
+        };
+        let numerator = 1.0 - osc + w_param * (r / r_param).powi(2);
+        let denom = 1.0 + ((r - r_param) / a_param).exp();
+        numerator / denom
+    }
+
+    /// Double-Gaussian proton density (unnormalized), matching McGlauber fF=10:
+    /// rho(r) = (1-p0)/R^3 * exp(-(r/R)^2) + p0/(0.4R)^3 * exp(-(r/(0.4R))^2)
+    fn proton_dgaussian_density(r: f64, r_param: f64) -> f64 {
+        const P0: f64 = 0.5;
+        let scale2 = 0.4 * r_param;
+        (1.0 - P0) / r_param.powi(3) * (-(r / r_param).powi(2)).exp()
+            + P0 / scale2.powi(3) * (-(r / scale2).powi(2)).exp()
+    }
+
+    /// Radial density rho(r) (unnormalized) matching TGlauNucleus::fF in McGlauber's
+    /// runglauber_v3.3.c. The nucleon radial probability distribution is proportional
+    /// to rho(r) * r^2, over r in [0, max_r].
+    fn radial_density(&self, r: f64, is_proton: bool) -> f64 {
+        match self.profile_type {
+            DensityProfile::ProtonExp => (-r / self.r).exp(),
+            DensityProfile::ProtonGaussian => (-(r * r) / (2.0 * self.r * self.r)).exp(),
+            DensityProfile::ProtonDGaussian => Self::proton_dgaussian_density(r, self.r),
+            DensityProfile::Hulthen | DensityProfile::HulthenConstrained => {
+                Self::hulthen_density(r, self.r, self.a)
+            }
+            DensityProfile::WoodsSaxon3PF => Self::woods_saxon_3pf(r, self.r, self.a, self.w),
+            DensityProfile::WoodsSaxon3PG => Self::woods_saxon_3pg(r, self.r, self.a, self.w),
+            DensityProfile::HarmonicOscillator => {
+                Self::harmonic_oscillator_density(r, self.r, self.a)
+            }
+            DensityProfile::Oxygen1970 => Self::oxygen_1970_density(r, self.r, self.a, self.w),
+            DensityProfile::ProtonNeutron3PF => {
+                let (r_param, a_param, w_param) = if is_proton {
+                    (self.r, self.a, self.w)
+                } else {
+                    (self.r2, self.a2, self.w2)
+                };
+                Self::woods_saxon_3pf(r, r_param, a_param, w_param)
+            }
+            DensityProfile::Reweighted | DensityProfile::DeformedReweighted => {
+                let denom = self.r0 + self.r1 * r + self.r2_factor * r * r;
+                Self::woods_saxon_3pf(r, self.r, self.a, self.w) / denom
+            }
+            DensityProfile::ProtonNeutronReweighted => {
+                let (r_param, a_param, w_param) = if is_proton {
+                    (self.r, self.a, self.w)
+                } else {
+                    (self.r2, self.a2, self.w2)
+                };
+                let denom = self.r0 + self.r1 * r + self.r2_factor * r * r;
+                Self::woods_saxon_3pf(r, r_param, a_param, w_param) / denom
+            }
+            _ => Self::woods_saxon_3pf(r, self.r, self.a, self.w),
+        }
+    }
+
+    /// Compute (and cache) the rejection-sampling envelope: the maximum of
+    /// rho(r) * r^2 over [0, max_r], with a small safety margin.
+    fn density_envelope(&mut self, is_proton: bool) -> f64 {
+        let cached = if is_proton {
+            self.density_env_p
+        } else {
+            self.density_env_n
+        };
+        if cached >= 0.0 {
+            return cached;
+        }
+        const GRID: usize = 512;
+        let mut peak = 0.0f64;
+        if self.max_r > 0.0 {
+            for i in 0..=GRID {
+                let r = self.max_r * i as f64 / GRID as f64;
+                let weight = self.radial_density(r, is_proton) * r * r;
+                if weight.is_finite() && weight > peak {
+                    peak = weight;
+                }
+            }
+        }
+        let envelope = if peak > 0.0 { peak * 1.05 } else { 0.0 };
+        if is_proton {
+            self.density_env_p = envelope;
+        } else {
+            self.density_env_n = envelope;
+        }
+        envelope
+    }
+
+    /// Sample a radius from the nuclear density profile using rejection sampling,
+    /// mirroring TGlauNucleus::ThrowNucleons (via TF1::GetRandom) in McGlauber.
+    fn sample_radius<R: Rng>(&mut self, rng: &mut R, is_proton: bool) -> f64 {
+        if self.max_r <= 0.0 {
+            return 0.0;
+        }
+        let envelope = self.density_envelope(is_proton);
+        if envelope <= 0.0 {
+            return self.max_r * rng.random::<f64>();
+        }
+        const MAX_TRIALS: usize = 100_000;
         for _ in 0..MAX_TRIALS {
-            let r = rng.r#gen_range(0.0..self.max_r);
-            let rho = self.woods_saxon_radius(r);
-            let r2 = r * r;
-            let weight = rho * r2;
-            let max_weight = self.max_r * self.max_r * 1.0;
-            if rng.r#gen::<f64>() * max_weight < weight {
+            let r = rng.random::<f64>() * self.max_r;
+            let u = rng.random::<f64>() * envelope;
+            if u < self.radial_density(r, is_proton) * r * r {
                 return r;
             }
         }
-        self.max_r * rng.r#gen::<f64>()
+        self.max_r * rng.random::<f64>()
+    }
+
+    /// Deformed nuclear surface radius R(theta), matching McGlauber's TF2 formula for fF=8/14:
+    /// R(theta) = R*(1 + beta2*0.315*(3cos^2(theta)-1) + beta4*0.105*(35cos^4(theta)-30cos^2(theta)+3))
+    fn deformed_r_theta(&self, theta: f64) -> f64 {
+        let ct = theta.cos();
+        self.r
+            * (1.0
+                + self.beta2 * 0.315 * (3.0 * ct * ct - 1.0)
+                + self.beta4 * 0.105 * (35.0 * ct.powi(4) - 30.0 * ct * ct + 3.0))
+    }
+
+    /// Unnormalized joint (r, theta) density r^2*sin(theta)/(1+exp((r-R(theta))/a)), optionally
+    /// divided by the radial reweighting polynomial, matching McGlauber fF=8/14.
+    fn deformed_weight(&self, r: f64, theta: f64) -> f64 {
+        let r_theta = self.deformed_r_theta(theta);
+        let mut w = r * r * theta.sin() / (1.0 + ((r - r_theta) / self.a).exp());
+        if self.profile_type == DensityProfile::DeformedReweighted {
+            let denom = self.r0 + self.r1 * r + self.r2_factor * r * r;
+            w /= denom;
+        }
+        w
+    }
+
+    /// Compute (and cache) the 2D rejection-sampling envelope for the deformed TF2 profile.
+    fn deformed_envelope(&mut self) -> f64 {
+        if self.density_env_deformed >= 0.0 {
+            return self.density_env_deformed;
+        }
+        const GRID_R: usize = 200;
+        const GRID_T: usize = 200;
+        let mut peak = 0.0f64;
+        if self.max_r > 0.0 {
+            for i in 0..=GRID_R {
+                let r = self.max_r * i as f64 / GRID_R as f64;
+                for j in 0..=GRID_T {
+                    let theta = PI * j as f64 / GRID_T as f64;
+                    let w = self.deformed_weight(r, theta);
+                    if w.is_finite() && w > peak {
+                        peak = w;
+                    }
+                }
+            }
+        }
+        let envelope = if peak > 0.0 { peak * 1.05 } else { 0.0 };
+        self.density_env_deformed = envelope;
+        envelope
+    }
+
+    /// Generate spherical coordinates for a nucleon - returns (r, phi, theta) with theta as polar angle.
+    /// cos(theta) is sampled uniformly in [-1, 1] so the angular distribution is isotropic,
+    /// matching McGlauber's `ctheta = 2*Rndm()-1; theta = ACos(ctheta)`.
+    fn generate_spherical_coordinates<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        is_proton: bool,
+    ) -> (f64, f64, f64) {
+        let r = self.sample_radius(rng, is_proton);
+        let phi = rng.random::<f64>() * TWO_PI;
+        let ctheta = 2.0 * rng.random::<f64>() - 1.0;
+        let theta = ctheta.acos();
+        (r, phi, theta)
     }
 
     /// Throw nucleons according to the density profile
@@ -999,130 +1246,146 @@ impl TGlauNucleus {
 
         self.trials = 0;
         self.non_smeared = 0;
-        self.phi_rot = rng.r#gen::<f64>() * TWO_PI;
-        let cos_theta = 2.0 * rng.r#gen::<f64>() - 1.0;
+        self.phi_rot = rng.random::<f64>() * TWO_PI;
+        let cos_theta = 2.0 * rng.random::<f64>() - 1.0;
         self.theta_rot = cos_theta.acos();
-        self.x_rot = rng.r#gen::<f64>() * TWO_PI;
-        self.y_rot = rng.r#gen::<f64>() * TWO_PI;
-        self.z_rot = rng.r#gen::<f64>() * TWO_PI;
+        self.x_rot = rng.random::<f64>() * TWO_PI;
+        self.y_rot = rng.random::<f64>() * TWO_PI;
+        self.z_rot = rng.random::<f64>() * TWO_PI;
 
-        // Store nucleon positions temporarily to avoid borrowing issues
+        let is_hulthen = matches!(
+            self.profile_type,
+            DensityProfile::Hulthen | DensityProfile::HulthenConstrained
+        );
+
+        // Store nucleon positions temporarily
         let mut positions: Vec<(f64, f64, f64)> = Vec::with_capacity(self.n as usize);
 
-        match self.profile_type {
-            DensityProfile::ProtonExp
-            | DensityProfile::ProtonGaussian
-            | DensityProfile::ProtonDGaussian
-            | DensityProfile::WoodsSaxon3PF
-            | DensityProfile::HarmonicOscillator => {
-                for _ in 0..self.n as usize {
-                    let r = self.random_woods_saxon(rng);
-                    let phi = rng.r#gen::<f64>() * TWO_PI;
-                    let ctheta = 2.0 * rng.r#gen::<f64>() - 1.0;
-                    let stheta = (1.0 - ctheta * ctheta).sqrt();
+        // Special handling for Hulthen (deuteron)
+        if is_hulthen {
+            let r = self.sample_radius(rng, true) / 2.0;
+            let phi = rng.random::<f64>() * TWO_PI;
+            let ctheta = 2.0 * rng.random::<f64>() - 1.0;
+            let stheta = (1.0 - ctheta * ctheta).sqrt();
 
-                    let x = r * stheta * phi.cos();
-                    let y = r * stheta * phi.sin();
-                    let z = r * ctheta;
+            let x1 = r * stheta * phi.cos();
+            let y1 = r * stheta * phi.sin();
+            let z1 = r * ctheta;
+            positions.push((x1, y1, z1));
 
-                    positions.push((x, y, z));
-                    self.trials += 1;
-                }
+            if matches!(self.profile_type, DensityProfile::HulthenConstrained) {
+                positions.push((-x1, -y1, -z1));
+            } else {
+                let r2 = self.sample_radius(rng, true) / 2.0;
+                let phi2 = rng.random::<f64>() * TWO_PI;
+                let ctheta2 = 2.0 * rng.random::<f64>() - 1.0;
+                let stheta2 = (1.0 - ctheta2 * ctheta2).sqrt();
+                positions.push((
+                    r2 * stheta2 * phi2.cos(),
+                    r2 * stheta2 * phi2.sin(),
+                    r2 * ctheta2,
+                ));
             }
-            DensityProfile::Ellipsoid | DensityProfile::DeformedBox => {
-                for _ in 0..self.n as usize {
-                    let mut placed = false;
-                    while !placed {
-                        let x = self.max_r * (2.0 * rng.r#gen::<f64>() - 1.0);
-                        let y = self.max_r * (2.0 * rng.r#gen::<f64>() - 1.0);
-                        let z = self.max_r * (2.0 * rng.r#gen::<f64>() - 1.0);
-                        let r = (x * x + y * y + z * z).sqrt();
-                        let theta = (z / r).acos();
-                        let r_theta = self.r + self.beta2 * theta.cos().powi(2);
+            self.trials = 1;
+        }
+        // Deformed nuclei with box method (Uranium-like)
+        else if matches!(
+            self.profile_type,
+            DensityProfile::Ellipsoid | DensityProfile::DeformedBox
+        ) {
+            for _i in 0..self.n as usize {
+                let mut placed = false;
+                while !placed {
+                    let x = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
+                    let y = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
+                    let z = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
+                    let r = (x * x + y * y + z * z).sqrt();
+                    let theta = (z / r).acos();
 
-                        let prob = (1.0 + self.w * (r / r_theta).powi(2))
-                            / (1.0 + ((r - r_theta) / self.a).exp());
-                        if rng.r#gen::<f64>() < prob {
-                            positions.push((x, y, z));
-                            placed = true;
+                    let r_theta = if self.profile_type == DensityProfile::Ellipsoid {
+                        self.r + self.beta2 * theta.cos().powi(2)
+                    } else {
+                        // DeformedBox with beta2, beta3, beta4
+                        let mut r_def = self.r;
+                        if self.beta2 != 0.0 {
+                            r_def +=
+                                self.r * self.beta2 * (3.0 * theta.cos().powi(2) - 1.0) * 0.315;
                         }
-                        self.trials += 1;
-                    }
-                }
-            }
-            DensityProfile::DeformedTF2 => {
-                for _ in 0..self.n as usize {
-                    let mut placed = false;
-                    while !placed {
-                        let r = self.random_woods_saxon(rng);
-                        let theta = rng.r#gen::<f64>() * PI;
-                        let phi = rng.r#gen::<f64>() * TWO_PI;
-
-                        let r_theta =
-                            self.r * (1.0 + self.beta2 * 0.315 * (3.0 * theta.cos().powi(2) - 1.0));
-                        let prob = 1.0 / (1.0 + ((r - r_theta) / self.a).exp());
-
-                        if rng.r#gen::<f64>() < prob {
-                            let x = r * theta.sin() * phi.cos();
-                            let y = r * theta.sin() * phi.sin();
-                            let z = r * theta.cos();
-                            positions.push((x, y, z));
-                            placed = true;
+                        if self.beta3 != 0.0 {
+                            // sph_legendre(3,0,theta) = sqrt(7/(4*pi)) * (5cos^3(theta)-3cos(theta))/2
+                            r_def += self.r
+                                * self.beta3
+                                * (5.0 * theta.cos().powi(3) - 3.0 * theta.cos())
+                                * 0.373176;
                         }
-                        self.trials += 1;
+                        if self.beta4 != 0.0 {
+                            r_def += self.r
+                                * self.beta4
+                                * (35.0 * theta.cos().powi(4) - 30.0 * theta.cos().powi(2) + 3.0)
+                                * 0.105;
+                        }
+                        r_def
+                    };
+
+                    let prob = (1.0 + self.w * (r / r_theta).powi(2))
+                        / (1.0 + ((r - r_theta) / self.a).exp());
+                    if rng.random::<f64>() < prob {
+                        positions.push((x, y, z));
+                        placed = true;
                     }
-                }
-            }
-            DensityProfile::Hulthen | DensityProfile::HulthenConstrained => {
-                // Hulthen distribution for deuteron
-                let r = self.random_woods_saxon(rng) / 2.0;
-                let phi = rng.r#gen::<f64>() * TWO_PI;
-                let ctheta = 2.0 * rng.r#gen::<f64>() - 1.0;
-                let stheta = (1.0 - ctheta * ctheta).sqrt();
-
-                let x1 = r * stheta * phi.cos();
-                let y1 = r * stheta * phi.sin();
-                let z1 = r * ctheta;
-                positions.push((x1, y1, z1));
-
-                if matches!(self.profile_type, DensityProfile::HulthenConstrained) {
-                    positions.push((-x1, -y1, -z1));
-                } else {
-                    let r2 = self.random_woods_saxon(rng) / 2.0;
-                    let phi2 = rng.r#gen::<f64>() * TWO_PI;
-                    let ctheta2 = 2.0 * rng.r#gen::<f64>() - 1.0;
-                    let stheta2 = (1.0 - ctheta2 * ctheta2).sqrt();
-                    positions.push((
-                        r2 * stheta2 * phi2.cos(),
-                        r2 * stheta2 * phi2.sin(),
-                        r2 * ctheta2,
-                    ));
-                }
-                self.trials = 1;
-            }
-            _ => {
-                // Default: uniform distribution within a sphere
-                for _ in 0..self.n as usize {
-                    let r = self.max_r * rng.r#gen::<f64>().powf(1.0 / 3.0);
-                    let phi = rng.r#gen::<f64>() * TWO_PI;
-                    let ctheta = 2.0 * rng.r#gen::<f64>() - 1.0;
-                    let stheta = (1.0 - ctheta * ctheta).sqrt();
-
-                    positions.push((r * stheta * phi.cos(), r * stheta * phi.sin(), r * ctheta));
                     self.trials += 1;
                 }
             }
         }
+        // DeformedTF2 (Al, Cu2, Xe2, etc.): joint 2D rejection sampling in (r, theta),
+        // matching McGlauber's TF2 GetRandom2 for fF=8/14.
+        else if matches!(
+            self.profile_type,
+            DensityProfile::DeformedTF2 | DensityProfile::DeformedReweighted
+        ) {
+            let envelope = self.deformed_envelope();
+            for _i in 0..self.n as usize {
+                loop {
+                    self.trials += 1;
+                    let r = rng.random::<f64>() * self.max_r;
+                    let theta = rng.random::<f64>() * PI;
+                    let accept = envelope <= 0.0
+                        || rng.random::<f64>() * envelope < self.deformed_weight(r, theta);
+                    if accept {
+                        let phi = rng.random::<f64>() * TWO_PI;
+                        let x = r * theta.sin() * phi.cos();
+                        let y = r * theta.sin() * phi.sin();
+                        let z = r * theta.cos();
+                        positions.push((x, y, z));
+                        break;
+                    }
+                }
+            }
+        }
+        // Standard spherical nuclei
+        else {
+            for i in 0..self.n as usize {
+                let is_proton = self.nucleons[i].is_proton();
+                let (r, phi, theta) = self.generate_spherical_coordinates(rng, is_proton);
+                let x = r * theta.sin() * phi.cos();
+                let y = r * theta.sin() * phi.sin();
+                let z = r * theta.cos();
+                positions.push((x, y, z));
+                self.trials += 1;
+            }
+        }
 
-        // Now set positions in nucleons
+        // Set positions in nucleons
         for (i, (x, y, z)) in positions.into_iter().enumerate() {
             if i < self.nucleons.len() {
                 self.nucleons[i].set_position(x, y, z);
+                // Apply rotation for deformed nuclei
                 if matches!(
                     self.profile_type,
                     DensityProfile::Ellipsoid
                         | DensityProfile::DeformedBox
                         | DensityProfile::DeformedTF2
+                        | DensityProfile::DeformedReweighted
                 ) {
                     self.nucleons[i].rotate_2d(self.phi_rot, self.theta_rot);
                 }
@@ -1166,6 +1429,47 @@ impl TGlauNucleus {
                     last.set_position(x, y, z);
                 }
             }
+            3 | 4 => {
+                if shift_mag > 1e-3 {
+                    let shift_vec = [sumx, sumy, sumz];
+                    let z_vec = [0.0, 0.0, 1.0];
+                    let cross_x = shift_vec[1] * z_vec[2] - shift_vec[2] * z_vec[1];
+                    let cross_y = shift_vec[2] * z_vec[0] - shift_vec[0] * z_vec[2];
+                    let cross_z = shift_vec[0] * z_vec[1] - shift_vec[1] * z_vec[0];
+                    let cross_mag =
+                        (cross_x * cross_x + cross_y * cross_y + cross_z * cross_z).sqrt();
+
+                    if cross_mag > 1e-10 {
+                        let angle = (shift_mag).acos();
+                        // Simplified rotation: rotate around the cross product axis
+                        for nucleon in &mut self.nucleons {
+                            let x = nucleon.x();
+                            let y = nucleon.y();
+                            let z = nucleon.z();
+                            // Apply rotation (simplified)
+                            let nx = cross_x * (cross_x * x + cross_y * y + cross_z * z)
+                                / (cross_mag * cross_mag)
+                                * (1.0 - angle.cos())
+                                + x * angle.cos()
+                                + (-cross_z * y + cross_y * z) / cross_mag * angle.sin();
+                            let ny = cross_y * (cross_x * x + cross_y * y + cross_z * z)
+                                / (cross_mag * cross_mag)
+                                * (1.0 - angle.cos())
+                                + y * angle.cos()
+                                + (cross_z * x - cross_x * z) / cross_mag * angle.sin();
+                            let nz = cross_z * (cross_x * x + cross_y * y + cross_z * z)
+                                / (cross_mag * cross_mag)
+                                * (1.0 - angle.cos())
+                                + z * angle.cos()
+                                + (-cross_y * x + cross_x * y) / cross_mag * angle.sin();
+                            nucleon.set_position(nx, ny, nz);
+                        }
+                        if self.recenter == 3 {
+                            fsumz = shift_mag;
+                        }
+                    }
+                }
+            }
             5 => {
                 fsumx = sumx;
                 fsumy = sumy;
@@ -1196,6 +1500,121 @@ impl TGlauNucleus {
             cmy / self.n as f64,
             cmz / self.n as f64,
         ]
+    }
+
+    /// Sample a single nucleon's distance from the nucleus center directly from the
+    /// nuclear density profile rho(r) via rejection sampling (see `radial_density`),
+    /// without the nucleus-level recentering, minimum-distance rejection, or rotation
+    /// that `throw_nucleons` applies. This reflects the radial shape of the density
+    /// profile (matching McGlauber's `fFunc1->GetRandom()`), which is what you want
+    /// when visualizing/validating the density function itself rather than a fully
+    /// assembled nucleus.
+    ///
+    /// For the Hulthen deuteron profile the density is sampled over the relative
+    /// proton-neutron coordinate, so (as in `throw_nucleons`) the result is halved
+    /// to give the nucleon's distance from the center of mass.
+    pub fn sample_nucleon_radius<R: Rng>(&mut self, rng: &mut R, is_proton: bool) -> f64 {
+        let r = self.sample_radius(rng, is_proton);
+        if matches!(
+            self.profile_type,
+            DensityProfile::Hulthen | DensityProfile::HulthenConstrained
+        ) {
+            r / 2.0
+        } else {
+            r
+        }
+    }
+
+    /// Sample a single nucleon's (r, phi, theta) directly from the nuclear density
+    /// function - r is the distance from the nucleus center, phi the azimuthal angle,
+    /// theta the polar angle (measured from the z-axis) in the nucleus's own intrinsic
+    /// frame. This uses exactly the same per-nucleon sampling as `throw_nucleons`
+    /// (rejection sampling on the McGlauber `TGlauNucleus::fF` density - 3pF, 3pG,
+    /// deformed profiles, etc. - see `radial_density`/`deformed_weight`), but skips the
+    /// nucleus-level recentering, minimum-distance rejection, and the random per-event
+    /// whole-nucleus orientation (`phi_rot`/`theta_rot`) that `throw_nucleons` applies
+    /// afterward. Skipping that final orientation matters: it's what lets a deformed
+    /// nucleus's theta-dependence (from beta2/beta3/beta4) actually show up here,
+    /// instead of being washed out into an isotropic lab-frame distribution.
+    pub fn sample_nucleon_direction<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        is_proton: bool,
+    ) -> (f64, f64, f64) {
+        let is_hulthen = matches!(
+            self.profile_type,
+            DensityProfile::Hulthen | DensityProfile::HulthenConstrained
+        );
+        if is_hulthen {
+            let r = self.sample_radius(rng, true) / 2.0;
+            let phi = rng.random::<f64>() * TWO_PI;
+            let ctheta = 2.0 * rng.random::<f64>() - 1.0;
+            return (r, phi, ctheta.acos());
+        }
+
+        if matches!(
+            self.profile_type,
+            DensityProfile::Ellipsoid | DensityProfile::DeformedBox
+        ) {
+            loop {
+                let x = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
+                let y = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
+                let z = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
+                let r = (x * x + y * y + z * z).sqrt();
+                if r == 0.0 {
+                    continue;
+                }
+                let theta = (z / r).acos();
+
+                let r_theta = if self.profile_type == DensityProfile::Ellipsoid {
+                    self.r + self.beta2 * theta.cos().powi(2)
+                } else {
+                    let mut r_def = self.r;
+                    if self.beta2 != 0.0 {
+                        r_def += self.r * self.beta2 * (3.0 * theta.cos().powi(2) - 1.0) * 0.315;
+                    }
+                    if self.beta3 != 0.0 {
+                        r_def += self.r
+                            * self.beta3
+                            * (5.0 * theta.cos().powi(3) - 3.0 * theta.cos())
+                            * 0.373176;
+                    }
+                    if self.beta4 != 0.0 {
+                        r_def += self.r
+                            * self.beta4
+                            * (35.0 * theta.cos().powi(4) - 30.0 * theta.cos().powi(2) + 3.0)
+                            * 0.105;
+                    }
+                    r_def
+                };
+
+                let prob = (1.0 + self.w * (r / r_theta).powi(2))
+                    / (1.0 + ((r - r_theta) / self.a).exp());
+                if rng.random::<f64>() < prob {
+                    let phi = y.atan2(x);
+                    return (r, phi, theta);
+                }
+            }
+        }
+
+        if matches!(
+            self.profile_type,
+            DensityProfile::DeformedTF2 | DensityProfile::DeformedReweighted
+        ) {
+            let envelope = self.deformed_envelope();
+            loop {
+                let r = rng.random::<f64>() * self.max_r;
+                let theta = rng.random::<f64>() * PI;
+                let accept = envelope <= 0.0
+                    || rng.random::<f64>() * envelope < self.deformed_weight(r, theta);
+                if accept {
+                    let phi = rng.random::<f64>() * TWO_PI;
+                    return (r, phi, theta);
+                }
+            }
+        }
+
+        self.generate_spherical_coordinates(rng, is_proton)
     }
 
     pub fn name(&self) -> &str {

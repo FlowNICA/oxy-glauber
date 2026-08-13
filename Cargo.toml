@@ -1,7 +1,7 @@
 # Cargo.toml
 [package]
 name = "oxy-glauber"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 authors = ["Constantin Loizides and others"]
 description = "Monte Carlo Glauber Model for Heavy-Ion Collisions - Rust port"
@@ -10,17 +10,19 @@ repository = "https://github.com/FlowNICA/oxy-glauber"
 
 [dependencies]
 oxyroot = "0.1.25"
-rand = "0.8"
-rand_distr = "0.4"
-num-traits = "0.2"
-anyhow = "1.0"
-thiserror = "1.0"
-rayon = "1.8"
-rand_chacha = "0.3"
-serde = {version = "1.0.228", features = ["derive"] }
+rand = "0.10.2"
+rand_distr = "0.6.0"
+num-traits = "0.2.19"
+anyhow = "1.0.104"
+thiserror = "2.0.20"
+rayon = "1.12.0"
+rand_chacha = "0.10.0"
+serde = {version = "1.0.229", features = ["derive"] }
+plotters = "0.3.7"
+parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
 
 [dev-dependencies]
-env_logger = "0.10"
+env_logger = "0.11.11"
 
 [[example]]
 name = "run_glauber"
@@ -29,6 +31,10 @@ path = "examples/run_glauber.rs"
 [[example]]
 name = "run_save_ntuple"
 path = "examples/run_save_ntuple.rs"
+
+[[example]]
+name = "run_save_parquet"
+path = "examples/run_save_parquet.rs"
 
 [[example]]
 name = "run_smear_ntuple"

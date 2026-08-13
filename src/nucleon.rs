@@ -116,28 +116,27 @@ impl TGlauNucleon {
         self.energy = en;
     }
 
+    /// Rotate so the z-axis is carried onto the direction (theta, phi), matching
+    /// ROOT's `TVector3::RotateUz` (as used by C++ `TGlauNucleon::RotateXYZ`) exactly -
+    /// this is *not* a sequential Z-then-X Euler rotation.
     pub fn rotate_2d(&mut self, phi: f64, theta: f64) {
-        // Simplified rotation - in full implementation would use rotation matrices
-        let x = self.x;
-        let y = self.y;
-        let z = self.z;
-        let cos_phi = phi.cos();
-        let sin_phi = phi.sin();
-        let cos_theta = theta.cos();
-        let sin_theta = theta.sin();
+        let (sin_theta, cos_theta) = theta.sin_cos();
+        let (sin_phi, cos_phi) = phi.sin_cos();
+        let u1 = sin_theta * cos_phi;
+        let u2 = sin_theta * sin_phi;
+        let u3 = cos_theta;
+        let up = (u1 * u1 + u2 * u2).sqrt();
 
-        // Rotate around Z axis by phi, then around X axis by theta
-        let x1 = x * cos_phi - y * sin_phi;
-        let y1 = x * sin_phi + y * cos_phi;
-        let z1 = z;
-
-        let x2 = x1;
-        let y2 = y1 * cos_theta - z1 * sin_theta;
-        let z2 = y1 * sin_theta + z1 * cos_theta;
-
-        self.x = x2;
-        self.y = y2;
-        self.z = z2;
+        let (px, py, pz) = (self.x, self.y, self.z);
+        if up > 0.0 {
+            self.x = (u1 * u3 * px - u2 * py) / up + u1 * pz;
+            self.y = (u2 * u3 * px + u1 * py) / up + u2 * pz;
+            self.z = -up * px + u3 * pz;
+        } else if u3 < 0.0 {
+            self.x = -px;
+            self.z = -pz;
+        }
+        // else: u3 >= 0 (theta == 0), identity - no change
     }
 
     pub fn rotate_3d(&mut self, psi_x: f64, psi_y: f64, psi_z: f64) {

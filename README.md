@@ -5,7 +5,7 @@
 
 A Rust implementation of the Monte Carlo Glauber Model for Heavy-Ion Collisions, based on the [TGlauberMC v3.3.2](https://tglaubermc.hepforge.org) C++ code.
 
-**NOTE**: this is a very early version, written with AI-assisted tools. It is not ready to be used in a proper analysis. Bug fixes are in progress.
+**NOTE**: This is a very early version, developed with AI-assisted tools. It may not yet be ready for use in a formal analysis. While the general cross-section, impact parameter, Npart, and Ncoll appear to be generated correctly, bugs are still very much expected.
 
 ## Overview
 
@@ -33,6 +33,7 @@ The code supports a wide range of nuclei, deformation parameters, and nucleon-nu
 - **Energy-dependent cross sections**: Automatic calculation from beam energy
 - **Multi-threaded parallel execution**: Automatically uses all available CPU cores for large event counts
 - **ROOT output**: Write results directly to ROOT TTrees using the `oxyroot` crate
+- **Parquet output**: Write results to size-optimized Apache Parquet files using the `parquet` crate
 - **Command-line interface**: Easy-to-use examples with argument parsing
 
 ## Installation
@@ -41,7 +42,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-oxy-glauber = "0.3.4"
+oxy-glauber = "0.3.6"
 ```
 
 Or clone the repository and build:
@@ -57,7 +58,7 @@ cargo build --release
 
 The simplest way to get started is to run the provided examples:
 
-### Run with default parameters (Pb+Pb, 68 mb, 10000 events)
+### Run with default parameters (Pbpnrw+Pbpnrw, 68 mb, 10000 events)
 ```bash
 cargo run --example run_save_ntuple
 ```
@@ -81,6 +82,26 @@ cargo run --example run_save_ntuple -- \
     --signn -5360  # 5.36 TeV
 ```
 
+### Run with default parameters, saving to Apache Parquet instead of ROOT
+`run_save_parquet` generates the exact same events as `run_save_ntuple` (same options,
+same defaults, same branches) but writes them to a size-optimized `.parquet` file
+instead of a ROOT TTree - see [Parquet Output](#parquet-output) below.
+```bash
+cargo run --example run_save_parquet
+```
+
+### Run with custom parameters, saving to Parquet
+```bash
+cargo run --example run_save_parquet -- \
+    --nevents 5000 \
+    --sysA Pb \
+    --sysB Pb \
+    --signn 68.0 \
+    --mind 0.4 \
+    --omega 0.3 \
+    --output my_output.parquet
+```
+
 ### Run the smearing example
 ```bash
 cargo run --example run_smear_ntuple -- \
@@ -98,22 +119,24 @@ cargo run --example run_glauber -- \
 
 ## Command-line Options
 
-All examples support the following common options:
+All examples (`run_save_ntuple`, `run_save_parquet`, `run_smear_ntuple`, `run_glauber`)
+accept the same option names, though a few defaults differ per example:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--nevents N`   |	Number of events to generate |	10000 |
-| `--sysA NAME`   |	Name of nucleus A |	Pbpnrw |
-| `--sysB NAME`   |	Name of nucleus B |	Pbpnrw |
-| `--signn VAL`   |	σ_NN in mb (negative = beam energy in GeV) |	68.0 |
-| `--mind VAL`    | Minimum nucleon distance in fm |	0.4 |
-| `--omega VAL`	  | Omega parameter for NN profile |	0.3 |
-| `--seed VAL`    | Random seed |	42 |
-| `--output FILE` |	Output file name |	Auto-generated |
-| `--help	Print` | help message |	- |
+| `--nevents N`   | Number of events to generate | 10000 (1000 for `run_glauber`/`run_smear_ntuple`) |
+| `--sysA NAME`   | Name of nucleus A | Pbpnrw (Pb for `run_glauber`) |
+| `--sysB NAME`   | Name of nucleus B | Pbpnrw (Pb for `run_glauber`) |
+| `--signn VAL`   | σ_NN in mb (negative = beam energy in GeV) | 68.0 |
+| `--mind VAL`    | Minimum nucleon distance in fm | 0.4 |
+| `--omega VAL`   | Omega parameter for NN profile | 0.0/hard sphere for `run_save_ntuple`/`run_save_parquet`, 0.3/Gamma for `run_glauber`/`run_smear_ntuple` |
+| `--seed VAL`    | Random seed | 42 |
+| `--output FILE` | Output file name | Auto-generated from run parameters (fixed `glauber_output.root` for `run_glauber`) |
+| `--help`        | Print help message | - |
 
 Additional options for specific examples:
 - `run_save_ntuple`: `--sigwidth`, `--noded`
+- `run_save_parquet`: `--sigwidth`, `--noded`
 - `run_glauber`: `--bmin`, `--bmax`
 - `run_smear_ntuple`: `--bmin`, `--bmax`
 
@@ -189,7 +212,7 @@ For smaller event counts or debugging, the code runs in single-threaded mode:
 use oxy_glauber::TGlauberMC;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     
     // Create Glauber model for Pb+Pb at 5.02 TeV (energy -> cross section)
     let mut glauber = TGlauberMC::new("Pb", "Pb", -5020.0, 0.0, 0.0);
@@ -227,11 +250,11 @@ The `omega` parameter controls the nucleon-nucleon interaction profile:
 
 | Omega value | Profile Type | Description |
 |-------------|--------------|-------------|
-| < 0 |	Hard sphere |	Default  approximation |
-| 0.0 - 2.0 |	Gamma distribution | Parameterized by ω |
+| ≤ 0 |	Hard sphere |	Default approximation (no NN profile) |
+| 0 < ω < 2 |	Gamma distribution | Parameterized by ω |
 | 7	| HIJING | Based on HIJING model |
 | 8 |	PYTHIA | Based on PYTHIA model |
-| 9 - 11 |	TRENTO | w = omega - 9 |
+| 9 ≤ ω < 11 |	TRENTO | w = omega - 9 |
 
 # Output Format
 Results are written to ROOT files as TTrees with the following branches:
@@ -243,6 +266,29 @@ Results are written to ROOT files as TTrees with the following branches:
 - `SpecA`, `SpecB`: Spectator counts
 - `Ecc1`-`Ecc5`: Eccentricities
 - `Psi1`-`Psi5`: Participant plane angles
+
+# Parquet Output
+`run_save_parquet` writes the identical set of branches listed above to an
+[Apache Parquet](https://parquet.apache.org) file instead of a ROOT TTree, using the
+`parquet` crate directly (no Arrow dependency required). This is a convenient,
+language-agnostic alternative when you want to read the results with `pandas`,
+`polars`, `DuckDB`, Spark, etc. instead of ROOT.
+
+The writer is tuned to produce the smallest file that's still fast to read:
+- **ZSTD compression** at level 19 - the level only affects write time, not read
+  (decompression) speed, so it's set high for a smaller file at no read-time cost.
+- **PLAIN encoding, no dictionary** - measured against the alternatives (dictionary
+  encoding, `BYTE_STREAM_SPLIT`) on real event data; PLAIN+ZSTD won because these
+  columns are full of exact repeated values (many counters at `0`, `Weight` at `1.0`,
+  small repeated integer-valued counts) that ZSTD's own match-finding compresses
+  better on raw interleaved floats than either alternative encoding does.
+- **A single row group** - all columns are already fully buffered in memory before
+  writing, so one row group per file maximizes how much repetition ZSTD can see per
+  column, with no downside since the file is meant to be read as a whole.
+
+On a 200k-event Pb+Pb run this produces a file roughly **half the size** of the
+equivalent ROOT TTree (12.0 MB vs 24.5 MB), with no loss of precision (all columns stay
+`f32`, matching the ROOT branches exactly).
 
 # Performance
 Oxy-Glauber leverages Rust's zero-cost abstractions and Rayon's work-stealing thread pool for excellent performance:
@@ -271,5 +317,5 @@ See the LICENSE file for details.
 Contributions are welcome! Please submit issues and pull requests on the GitHub repository.
 
 # Version
-Current version: 0.3.4
+Current version: 0.3.6
 Based on TGlauberMC v3.3.2

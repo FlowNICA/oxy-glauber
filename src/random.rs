@@ -1,5 +1,5 @@
 // src/random.rs
-use rand::Rng;
+use rand::RngExt as _;
 use rand::rngs::ThreadRng;
 
 /// Extension trait for random number generation
@@ -11,7 +11,7 @@ pub trait RngExt {
 
 impl RngExt for ThreadRng {
     fn uniform(&mut self, min: f64, max: f64) -> f64 {
-        self.gen_range(min..max)
+        self.random_range(min..max)
     }
 
     fn gaussian(&mut self, mean: f64, sigma: f64) -> f64 {

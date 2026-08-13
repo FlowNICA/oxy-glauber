@@ -14,7 +14,9 @@ pub use nucleon::TGlauNucleon;
 pub use nucleus::TGlauNucleus;
 pub use profile::{NNProfile, NNProfileType, profile_from_omega};
 
-pub const VERSION: &str = "0.3.3";
+/// Kept in sync with the `version` field in Cargo.toml automatically, so it can never
+/// drift out of date the way a hardcoded string literal would.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Physical constants
 pub mod constants {

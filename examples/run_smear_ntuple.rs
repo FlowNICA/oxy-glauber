@@ -175,7 +175,7 @@ fn run_and_smear_ntuple(
     _seed: u64,
     output_file: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, 0.0, 0.0);
     glauber.set_min_distance(mind);
