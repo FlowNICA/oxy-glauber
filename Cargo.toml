@@ -9,7 +9,7 @@ license = "GPL-3.0"
 repository = "https://github.com/FlowNICA/oxy-glauber"
 
 [dependencies]
-oxyroot = "0.1.25"
+oxiroot = { git = "https://github.com/mathieuouillon/oxiroot", tag = "v0.3.0", default-features = false }
 rand = "0.10.2"
 rand_distr = "0.6.0"
 num-traits = "0.2.19"

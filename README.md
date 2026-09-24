@@ -32,7 +32,7 @@ The code supports a wide range of nuclei, deformation parameters, and nucleon-nu
   - TRENTO-based
 - **Energy-dependent cross sections**: Automatic calculation from beam energy
 - **Multi-threaded parallel execution**: Automatically uses all available CPU cores for large event counts
-- **ROOT output**: Write results directly to ROOT TTrees using the `oxyroot` crate
+- **ROOT output**: Write results directly to LZMA-compressed ROOT TTrees using the [`oxiroot`](https://github.com/mathieuouillon/oxiroot) crate
 - **Parquet output**: Write results to size-optimized Apache Parquet files using the `parquet` crate
 - **Command-line interface**: Easy-to-use examples with argument parsing
 

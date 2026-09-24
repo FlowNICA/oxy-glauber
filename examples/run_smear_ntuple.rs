@@ -1,6 +1,7 @@
 // examples/run_smear_ntuple.rs
+use oxiroot::Compression;
+use oxiroot::tree::{Branch, Tree};
 use oxy_glauber::{TGlauberEvent, TGlauberMC};
-use oxyroot::{RootFile, WriterTree};
 use std::env;
 
 fn print_usage() {
@@ -204,19 +205,20 @@ fn run_and_smear_ntuple(
     let ecc3: Vec<f32> = events.iter().map(|e| e.ecc3).collect();
 
     // Write to ROOT file
-    let mut file = RootFile::create(&filename)?;
-    let mut tree = WriterTree::new("glauber_smeared");
-
-    tree.new_branch("Npart", npart.into_iter());
-    tree.new_branch("Ncoll", ncoll.into_iter());
-    tree.new_branch("B", b.into_iter());
-    tree.new_branch("Ecc2", ecc2.into_iter());
-    tree.new_branch("Ecc2Smeared", smeared_ecc2.into_iter());
-    tree.new_branch("Ecc3", ecc3.into_iter());
-    tree.new_branch("Ecc3Smeared", placeholder_ecc3.into_iter());
-
-    tree.write(&mut file)?;
-    file.close()?;
+    let tree = Tree::new(
+        "glauber_smeared",
+        vec![
+            Branch::f32("Npart", npart),
+            Branch::f32("Ncoll", ncoll),
+            Branch::f32("B", b),
+            Branch::f32("Ecc2", ecc2),
+            Branch::f32("Ecc2Smeared", smeared_ecc2),
+            Branch::f32("Ecc3", ecc3),
+            Branch::f32("Ecc3Smeared", placeholder_ecc3),
+        ],
+    );
+    // Same codec as run_save_ntuple.rs (see its `COMPRESSION` for the measurements).
+    tree.write_root(filename, Compression::Lzma(9))?;
 
     println!();
     println!(

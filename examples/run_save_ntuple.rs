@@ -1,7 +1,25 @@
 // examples/run_save_ntuple.rs
+use oxiroot::Compression;
+use oxiroot::tree::{Branch, Tree};
 use oxy_glauber::{TGlauberEvent, TGlauberMC};
-use oxyroot::{RootFile, WriterTree};
 use std::env;
+
+/// Compression applied to every basket of the output TTree.
+///
+/// Same goal as `ZSTD_LEVEL` in `run_save_parquet.rs`: the smallest file that is still
+/// fast to read. oxiroot's encoders are pure Rust, and its Zstd encoder has a single
+/// (fastest) level - the requested level is only recorded, not used - so Zstd can't be
+/// tuned for ratio here the way it is for Parquet. Measured on a 200k-event Pb+Pb run
+/// (all 32 branches, one basket each):
+/// - None: 25.64 MB
+/// - LZ4: 18.69 MB
+/// - Zstd: 16.92 MB, full read-back 0.05 s
+/// - Zlib level 9: 14.55 MB, full read-back 0.06 s
+/// - LZMA level 9: 10.44 MB, full read-back 0.42 s - the winner, kept below.
+///
+/// LZMA's extra write time (~5 s) is negligible next to event generation, and reading
+/// is still well under a second, so the smaller file is the better trade.
+const COMPRESSION: Compression = Compression::Lzma(9);
 
 fn print_usage() {
     println!("Usage: run_save_ntuple [options]");
@@ -192,7 +210,7 @@ fn run_and_save_ntuple(
 
     let events = glauber.run(nevents, &mut rng, None);
 
-    // --- Prepare data for writing with oxyroot ---
+    // --- Prepare data for writing with oxiroot ---
     // Collect each field into a separate Vec<f32>
     let npart: Vec<f32> = events.iter().map(|e| e.npart).collect();
     let ncoll: Vec<f32> = events.iter().map(|e| e.ncoll).collect();
@@ -227,47 +245,47 @@ fn run_and_save_ntuple(
     let psi5: Vec<f32> = events.iter().map(|e| e.psi5).collect();
     let ecc5: Vec<f32> = events.iter().map(|e| e.ecc5).collect();
 
-    // --- Write to ROOT file using WriterTree ---
-    let mut file = RootFile::create(&filename)?;
-    let mut tree = WriterTree::new("glauber");
-
-    // Pass iterators using .into_iter()
-    tree.new_branch("Npart", npart.into_iter());
-    tree.new_branch("Ncoll", ncoll.into_iter());
-    tree.new_branch("Nhard", nhard.into_iter());
-    tree.new_branch("Nmpi", nmpi.into_iter());
-    tree.new_branch("B", b.into_iter());
-    tree.new_branch("BNN", bnn.into_iter());
-    tree.new_branch("Ncollpp", ncollpp.into_iter());
-    tree.new_branch("Ncollpn", ncollpn.into_iter());
-    tree.new_branch("Ncollnn", ncollnn.into_iter());
-    tree.new_branch("VarX", var_x.into_iter());
-    tree.new_branch("VarY", var_y.into_iter());
-    tree.new_branch("VarXY", var_xy.into_iter());
-    tree.new_branch("NpartA", npart_a.into_iter());
-    tree.new_branch("NpartB", npart_b.into_iter());
-    tree.new_branch("Npart0", npart0.into_iter());
-    tree.new_branch("NpartAn", npart_an.into_iter());
-    tree.new_branch("NpartBn", npart_bn.into_iter());
-    tree.new_branch("Npart0n", npart0n.into_iter());
-    tree.new_branch("AreaW", area_w.into_iter());
-    tree.new_branch("SpecA", spec_a.into_iter());
-    tree.new_branch("SpecB", spec_b.into_iter());
-    tree.new_branch("Weight", weight.into_iter());
-    tree.new_branch("Psi1", psi1.into_iter());
-    tree.new_branch("Ecc1", ecc1.into_iter());
-    tree.new_branch("Psi2", psi2.into_iter());
-    tree.new_branch("Ecc2", ecc2.into_iter());
-    tree.new_branch("Psi3", psi3.into_iter());
-    tree.new_branch("Ecc3", ecc3.into_iter());
-    tree.new_branch("Psi4", psi4.into_iter());
-    tree.new_branch("Ecc4", ecc4.into_iter());
-    tree.new_branch("Psi5", psi5.into_iter());
-    tree.new_branch("Ecc5", ecc5.into_iter());
-
-    // Write the tree to the file and close it
-    tree.write(&mut file)?;
-    file.close()?;
+    // --- Write to ROOT file as a TTree ---
+    // One basket per branch: like the single Parquet row group in run_save_parquet.rs,
+    // this lets the compressor see each whole column at once.
+    let tree = Tree::new(
+        "glauber",
+        vec![
+            Branch::f32("Npart", npart),
+            Branch::f32("Ncoll", ncoll),
+            Branch::f32("Nhard", nhard),
+            Branch::f32("Nmpi", nmpi),
+            Branch::f32("B", b),
+            Branch::f32("BNN", bnn),
+            Branch::f32("Ncollpp", ncollpp),
+            Branch::f32("Ncollpn", ncollpn),
+            Branch::f32("Ncollnn", ncollnn),
+            Branch::f32("VarX", var_x),
+            Branch::f32("VarY", var_y),
+            Branch::f32("VarXY", var_xy),
+            Branch::f32("NpartA", npart_a),
+            Branch::f32("NpartB", npart_b),
+            Branch::f32("Npart0", npart0),
+            Branch::f32("NpartAn", npart_an),
+            Branch::f32("NpartBn", npart_bn),
+            Branch::f32("Npart0n", npart0n),
+            Branch::f32("AreaW", area_w),
+            Branch::f32("SpecA", spec_a),
+            Branch::f32("SpecB", spec_b),
+            Branch::f32("Weight", weight),
+            Branch::f32("Psi1", psi1),
+            Branch::f32("Ecc1", ecc1),
+            Branch::f32("Psi2", psi2),
+            Branch::f32("Ecc2", ecc2),
+            Branch::f32("Psi3", psi3),
+            Branch::f32("Ecc3", ecc3),
+            Branch::f32("Psi4", psi4),
+            Branch::f32("Ecc4", ecc4),
+            Branch::f32("Psi5", psi5),
+            Branch::f32("Ecc5", ecc5),
+        ],
+    );
+    tree.write_root(filename, COMPRESSION)?;
 
     println!();
     println!(

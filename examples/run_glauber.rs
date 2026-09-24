@@ -1,6 +1,7 @@
 // examples/run_glauber.rs
+use oxiroot::Compression;
+use oxiroot::tree::{Branch, Tree};
 use oxy_glauber::TGlauberMC;
-use oxyroot::{RootFile, WriterTree};
 use std::env;
 
 fn print_usage() {
@@ -193,7 +194,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Average Ecc2: {:.4}", ecc2_avg);
     println!("Average Ecc3: {:.4}", ecc3_avg);
 
-    // Save to ROOT file using oxyroot
+    // Save to ROOT file using oxiroot
     println!("\nSaving results to {}", output);
 
     // Prepare data
@@ -203,17 +204,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ecc2: Vec<f32> = events.iter().map(|e| e.ecc2).collect();
     let ecc3: Vec<f32> = events.iter().map(|e| e.ecc3).collect();
 
-    let mut file = RootFile::create(&output)?;
-    let mut tree = WriterTree::new("glauber");
-
-    tree.new_branch("Npart", npart.into_iter());
-    tree.new_branch("Ncoll", ncoll.into_iter());
-    tree.new_branch("B", b.into_iter());
-    tree.new_branch("Ecc2", ecc2.into_iter());
-    tree.new_branch("Ecc3", ecc3.into_iter());
-
-    tree.write(&mut file)?;
-    file.close()?;
+    let tree = Tree::new(
+        "glauber",
+        vec![
+            Branch::f32("Npart", npart),
+            Branch::f32("Ncoll", ncoll),
+            Branch::f32("B", b),
+            Branch::f32("Ecc2", ecc2),
+            Branch::f32("Ecc3", ecc3),
+        ],
+    );
+    // Same codec as run_save_ntuple.rs (see its `COMPRESSION` for the measurements).
+    tree.write_root(&output, Compression::Lzma(9))?;
 
     println!("Done!");
 
