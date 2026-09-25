@@ -11,7 +11,7 @@ pub mod random;
 pub use cross_section::CrossSection;
 pub use glauber::{TGlauberEvent, TGlauberMC};
 pub use nucleon::TGlauNucleon;
-pub use nucleus::TGlauNucleus;
+pub use nucleus::{NucleusError, TGlauNucleus};
 pub use profile::{NNProfile, NNProfileType, profile_from_omega};
 
 /// Kept in sync with the `version` field in Cargo.toml automatically, so it can never

@@ -1,54 +1,40 @@
-// examples/run_smear_ntuple.rs
+// src/bin/run_glauber.rs
 use oxiroot::Compression;
 use oxiroot::tree::{Branch, Tree};
-use oxy_glauber::{TGlauberEvent, TGlauberMC};
+use oxy_glauber::TGlauberMC;
 use std::env;
 
 fn print_usage() {
-    println!("Usage: run_smear_ntuple [options]");
+    println!("Usage: run_glauber [options]");
     println!("Options:");
     println!("  --nevents N       Number of events to generate (default: 1000)");
-    println!("  --sysA NAME       Name of nucleus A (default: Pbpnrw)");
-    println!("  --sysB NAME       Name of nucleus B (default: Pbpnrw)");
+    println!("  --sysA NAME       Name of nucleus A (default: Pb)");
+    println!("  --sysB NAME       Name of nucleus B (default: Pb)");
     println!("  --signn VAL       Nucleon-nucleon cross section in mb (default: 68.0)");
     println!("  --mind VAL        Minimum distance between nucleons in fm (default: 0.4)");
     println!("  --omega VAL       Omega parameter for NN profile (default: 0.3)");
     println!("  --bmin VAL        Minimum impact parameter in fm (default: 0.0)");
     println!("  --bmax VAL        Maximum impact parameter in fm (default: 20.0)");
     println!("  --seed VAL        Random seed (default: 42)");
-    println!("  --output FILE     Output file name (default: auto-generated)");
+    println!("  --output FILE     Output file name (default: glauber_output.root)");
     println!("  --help            Print this help message");
     println!();
     println!("Note: If signn is negative, it is interpreted as beam energy in GeV");
 }
 
-fn parse_args() -> Result<
-    (
-        i32,
-        String,
-        String,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        u64,
-        Option<String>,
-    ),
-    String,
-> {
+fn parse_args() -> Result<(i32, String, String, f64, f64, f64, f64, f64, u64, String), String> {
     let args: Vec<String> = env::args().collect();
 
     let mut nevents = 1000;
-    let mut sys_a = "Pbpnrw".to_string();
-    let mut sys_b = "Pbpnrw".to_string();
+    let mut sys_a = "Pb".to_string();
+    let mut sys_b = "Pb".to_string();
     let mut signn = 68.0;
     let mut mind = 0.4;
     let mut omega = 0.3;
     let mut bmin = 0.0;
     let mut bmax = 20.0;
     let mut seed = 42;
-    let mut output = None;
+    let mut output = "glauber_output.root".to_string();
 
     let mut i = 1;
     while i < args.len() {
@@ -135,7 +121,7 @@ fn parse_args() -> Result<
                 if i >= args.len() {
                     return Err("Missing value for --output".to_string());
                 }
-                output = Some(args[i].clone());
+                output = args[i].clone();
             }
             "--help" => {
                 print_usage();
@@ -153,84 +139,6 @@ fn parse_args() -> Result<
     ))
 }
 
-/// Calculate Gaussian smeared eccentricities (simplified)
-fn smeared_eccentricities(events: &[TGlauberEvent], sigma: f64) -> Vec<f32> {
-    events
-        .iter()
-        .map(|e| {
-            let noise = 0.1 * sigma;
-            ((e.ecc2 as f64 + noise).max(0.0)) as f32
-        })
-        .collect()
-}
-
-fn run_and_smear_ntuple(
-    nevents: i32,
-    sys_a: &str,
-    sys_b: &str,
-    signn: f64,
-    mind: f64,
-    omega: f64,
-    bmin: f64,
-    bmax: f64,
-    _seed: u64,
-    output_file: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut rng = rand::rng();
-
-    let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, 0.0, 0.0);
-    glauber.set_min_distance(mind);
-    glauber.set_omega(omega);
-    glauber.set_bmin(bmin);
-    glauber.set_bmax(bmax);
-
-    let name = format!("{}_smeared.root", glauber.str());
-    let filename = output_file.unwrap_or(&name);
-
-    println!("Running Glauber MC with smearing for {} + {}", sys_a, sys_b);
-    println!("Generating {} events...", nevents);
-    println!("Impact parameter range: {:.1} - {:.1} fm", bmin, bmax);
-
-    let events = glauber.run(nevents, &mut rng, None);
-
-    // Calculate smeared eccentricities
-    let smeared_ecc2 = smeared_eccentricities(&events, 0.4);
-    let placeholder_ecc3: Vec<f32> = vec![0.0f32; events.len()];
-
-    // Prepare data
-    let npart: Vec<f32> = events.iter().map(|e| e.npart).collect();
-    let ncoll: Vec<f32> = events.iter().map(|e| e.ncoll).collect();
-    let b: Vec<f32> = events.iter().map(|e| e.b).collect();
-    let ecc2: Vec<f32> = events.iter().map(|e| e.ecc2).collect();
-    let ecc3: Vec<f32> = events.iter().map(|e| e.ecc3).collect();
-
-    // Write to ROOT file
-    let tree = Tree::new(
-        "glauber_smeared",
-        vec![
-            Branch::f32("Npart", npart),
-            Branch::f32("Ncoll", ncoll),
-            Branch::f32("B", b),
-            Branch::f32("Ecc2", ecc2),
-            Branch::f32("Ecc2Smeared", smeared_ecc2),
-            Branch::f32("Ecc3", ecc3),
-            Branch::f32("Ecc3Smeared", placeholder_ecc3),
-        ],
-    );
-    // Same codec as run_save_ntuple.rs (see its `COMPRESSION` for the measurements).
-    tree.write_root(filename, Compression::Lzma(9))?;
-
-    println!();
-    println!(
-        "Total cross section: {:.3} +/- {:.3} mb",
-        glauber.total_xsect(),
-        glauber.total_xsect_err()
-    );
-    println!("Results saved to {}", filename);
-
-    Ok(())
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
@@ -240,7 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output) = parse_args()?;
+    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, _seed, output) = parse_args()?;
 
     println!("=== Oxy-Glauber v{} ===", oxy_glauber::VERSION);
     println!("Simulation parameters:");
@@ -251,25 +159,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Min distance: {} fm", mind);
     println!("  Omega: {}", omega);
     println!("  b range: {} - {} fm", bmin, bmax);
-    println!("  Random seed: {}", seed);
-    println!(
-        "  Output: {}",
-        output.as_deref().unwrap_or("auto-generated")
-    );
+    println!("  Output: {}", output);
     println!();
 
-    run_and_smear_ntuple(
-        nevents,
-        &sys_a,
-        &sys_b,
-        signn,
-        mind,
-        omega,
-        bmin,
-        bmax,
-        seed,
-        output.as_deref(),
-    )?;
+    let mut rng = rand::rng();
+
+    let mut glauber = TGlauberMC::new(&sys_a, &sys_b, signn, 0.0, 0.0)?;
+    glauber.set_min_distance(mind);
+    glauber.set_omega(omega);
+    glauber.set_bmin(bmin);
+    glauber.set_bmax(bmax);
+
+    println!("Running Glauber Monte Carlo for {}+{}...", sys_a, sys_b);
+    println!("Generating {} events...", nevents);
+
+    let events = glauber.run(nevents, &mut rng, None);
+
+    println!();
+    println!(
+        "Total cross section: {:.3} +/- {:.3} mb",
+        glauber.total_xsect(),
+        glauber.total_xsect_err()
+    );
+
+    // Print summary statistics
+    let npart_avg: f64 = events.iter().map(|e| e.npart as f64).sum::<f64>() / events.len() as f64;
+    let ncoll_avg: f64 = events.iter().map(|e| e.ncoll as f64).sum::<f64>() / events.len() as f64;
+    let ecc2_avg: f64 = events.iter().map(|e| e.ecc2 as f64).sum::<f64>() / events.len() as f64;
+    let ecc3_avg: f64 = events.iter().map(|e| e.ecc3 as f64).sum::<f64>() / events.len() as f64;
+
+    println!();
+    println!("Average Npart: {:.2}", npart_avg);
+    println!("Average Ncoll: {:.2}", ncoll_avg);
+    println!("Average Ecc2: {:.4}", ecc2_avg);
+    println!("Average Ecc3: {:.4}", ecc3_avg);
+
+    // Save to ROOT file using oxiroot
+    println!("\nSaving results to {}", output);
+
+    // Prepare data
+    let npart: Vec<f32> = events.iter().map(|e| e.npart).collect();
+    let ncoll: Vec<f32> = events.iter().map(|e| e.ncoll).collect();
+    let b: Vec<f32> = events.iter().map(|e| e.b).collect();
+    let ecc2: Vec<f32> = events.iter().map(|e| e.ecc2).collect();
+    let ecc3: Vec<f32> = events.iter().map(|e| e.ecc3).collect();
+
+    let tree = Tree::new(
+        "glauber",
+        vec![
+            Branch::f32("Npart", npart),
+            Branch::f32("Ncoll", ncoll),
+            Branch::f32("B", b),
+            Branch::f32("Ecc2", ecc2),
+            Branch::f32("Ecc3", ecc3),
+        ],
+    );
+    // Same codec as run_save_ntuple.rs (see its `COMPRESSION` for the measurements).
+    tree.write_root(&output, Compression::Lzma(9))?;
+
+    println!("Done!");
 
     Ok(())
 }

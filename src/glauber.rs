@@ -2,7 +2,7 @@
 use crate::constants::{MB_TO_FM2, PI, TWO_PI};
 use crate::cross_section::CrossSection;
 use crate::nucleon::TGlauNucleon;
-use crate::nucleus::TGlauNucleus;
+use crate::nucleus::{NucleusError, TGlauNucleus};
 use crate::profile::{NNProfile, profile_from_omega};
 use rand::Rng;
 use rand::RngExt;
@@ -876,7 +876,16 @@ pub struct TGlauberMC {
 }
 
 impl TGlauberMC {
-    pub fn new(na: &str, nb: &str, xsect: f64, xsect_sigma: f64, xsect_np: f64) -> Self {
+    /// Fails if `na` or `nb` is not a nucleus defined in `data/nuclei.ron`.
+    pub fn new(
+        na: &str,
+        nb: &str,
+        xsect: f64,
+        xsect_sigma: f64,
+        xsect_np: f64,
+    ) -> Result<Self, NucleusError> {
+        let nucleus_a = TGlauNucleus::new(na)?;
+        let nucleus_b = TGlauNucleus::new(nb)?;
         let mut xsect_use = xsect;
         let mut xsect_np_use = xsect_np;
         // Matches the C++ member-initializer-list default (fSigH(129.4)); only
@@ -908,9 +917,6 @@ impl TGlauberMC {
             None
         };
 
-        let nucleus_a = TGlauNucleus::new(na);
-        let nucleus_b = TGlauNucleus::new(nb);
-
         let config = GlauberConfig {
             nucleus_a_name: na.to_string(),
             nucleus_b_name: nb.to_string(),
@@ -934,7 +940,7 @@ impl TGlauberMC {
             xsect_fluct: xsect_fluct.clone(),
         };
 
-        Self {
+        Ok(Self {
             nucleus_a,
             nucleus_b,
             xsect: xsect_use,
@@ -960,7 +966,7 @@ impl TGlauberMC {
             bc: Vec::new(),
             mpi: [0; 99],
             config,
-        }
+        })
     }
 
     pub fn with_profile(mut self, profile: NNProfile) -> Self {
@@ -1231,8 +1237,11 @@ impl TGlauberMC {
         bgen: Option<f64>,
     ) -> (TGlauberEvent, f64) {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
-        let mut nucleus_a = TGlauNucleus::new(&config.nucleus_a_name);
-        let mut nucleus_b = TGlauNucleus::new(&config.nucleus_b_name);
+        // Names were already validated in `TGlauberMC::new`.
+        let mut nucleus_a =
+            TGlauNucleus::new(&config.nucleus_a_name).expect("nucleus A validated in new()");
+        let mut nucleus_b =
+            TGlauNucleus::new(&config.nucleus_b_name).expect("nucleus B validated in new()");
 
         nucleus_a.set_min_dist(config.min_dist);
         nucleus_a.set_node_dist(config.node_dist);

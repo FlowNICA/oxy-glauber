@@ -34,7 +34,7 @@ The code supports a wide range of nuclei, deformation parameters, and nucleon-nu
 - **Multi-threaded parallel execution**: Automatically uses all available CPU cores for large event counts
 - **ROOT output**: Write results directly to LZMA-compressed ROOT TTrees using the [`oxiroot`](https://github.com/mathieuouillon/oxiroot) crate
 - **Parquet output**: Write results to size-optimized Apache Parquet files using the `parquet` crate
-- **Command-line interface**: Easy-to-use examples with argument parsing
+- **Command-line interface**: Ready-to-run binaries with argument parsing
 
 ## Installation
 
@@ -56,16 +56,16 @@ cargo build --release
 
 ## Running the Examples
 
-The simplest way to get started is to run the provided examples:
+The simplest way to get started is to run the provided binaries:
 
 ### Run with default parameters (Pbpnrw+Pbpnrw, 68 mb, 10000 events)
 ```bash
-cargo run --example run_save_ntuple
+cargo run --release --bin run_save_ntuple
 ```
 
 ### Run with custom parameters
 ```bash
-cargo run --example run_save_ntuple -- \
+cargo run --release --bin run_save_ntuple -- \
     --nevents 5000 \
     --sysA Pb \
     --sysB Pb \
@@ -77,7 +77,7 @@ cargo run --example run_save_ntuple -- \
 
 ### Run with energy instead of cross section (signn negative = energy in GeV)
 ```bash
-cargo run --example run_save_ntuple -- \
+cargo run --release --bin run_save_ntuple -- \
     --nevents 1000 \
     --signn -5360  # 5.36 TeV
 ```
@@ -87,12 +87,12 @@ cargo run --example run_save_ntuple -- \
 same defaults, same branches) but writes them to a size-optimized `.parquet` file
 instead of a ROOT TTree - see [Parquet Output](#parquet-output) below.
 ```bash
-cargo run --example run_save_parquet
+cargo run --release --bin run_save_parquet
 ```
 
 ### Run with custom parameters, saving to Parquet
 ```bash
-cargo run --example run_save_parquet -- \
+cargo run --release --bin run_save_parquet -- \
     --nevents 5000 \
     --sysA Pb \
     --sysB Pb \
@@ -102,16 +102,16 @@ cargo run --example run_save_parquet -- \
     --output my_output.parquet
 ```
 
-### Run the smearing example
+### Run the smearing binary
 ```bash
-cargo run --example run_smear_ntuple -- \
+cargo run --release --bin run_smear_ntuple -- \
     --nevents 1000 \
     --bmax 15.0
 ```
 
-### Run the basic example with fewer branches
+### Run the basic binary with fewer branches
 ```bash
-cargo run --example run_glauber -- \
+cargo run --release --bin run_glauber -- \
     --nevents 1000 \
     --sysA Pb \
     --sysB Pb
@@ -119,8 +119,8 @@ cargo run --example run_glauber -- \
 
 ## Command-line Options
 
-All examples (`run_save_ntuple`, `run_save_parquet`, `run_smear_ntuple`, `run_glauber`)
-accept the same option names, though a few defaults differ per example:
+All binaries (`run_save_ntuple`, `run_save_parquet`, `run_smear_ntuple`, `run_glauber`)
+accept the same option names, though a few defaults differ per binary:
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -134,7 +134,7 @@ accept the same option names, though a few defaults differ per example:
 | `--output FILE` | Output file name | Auto-generated from run parameters (fixed `glauber_output.root` for `run_glauber`) |
 | `--help`        | Print help message | - |
 
-Additional options for specific examples:
+Additional options for specific binaries:
 - `run_save_ntuple`: `--sigwidth`, `--noded`
 - `run_save_parquet`: `--sigwidth`, `--noded`
 - `run_glauber`: `--bmin`, `--bmax`
@@ -189,7 +189,7 @@ let pool = ThreadPoolBuilder::new()
     .unwrap();
 
 pool.install(|| {
-    let mut glauber = TGlauberMC::new("Pb", "Pb", 68.0, 0.0, 0.0);
+    let mut glauber = TGlauberMC::new("Pb", "Pb", 68.0, 0.0, 0.0).unwrap();
     let events = glauber.run_parallel(100000, None);
 });
 ```
@@ -215,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
     
     // Create Glauber model for Pb+Pb at 5.02 TeV (energy -> cross section)
-    let mut glauber = TGlauberMC::new("Pb", "Pb", -5020.0, 0.0, 0.0);
+    let mut glauber = TGlauberMC::new("Pb", "Pb", -5020.0, 0.0, 0.0)?;
     
     // Configure parameters
     glauber.set_min_distance(0.4);
@@ -243,7 +243,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 # Supported Nuclei
-See the `TGlauNucleus::lookup` function in the `src/nucleus.rs` for the complete list.
+See `data/nuclei.ron` for the complete list and the parameters of each nucleus. The file is embedded in the library at compile time; to add a nucleus, add an entry there and rebuild. Requesting a name that is not in the file makes `TGlauNucleus::new` / `TGlauberMC::new` return a `NucleusError::Unknown` error.
+
+Nucleons can also be taken from precomputed configurations (e.g. from ab-initio calculations) with `profile: FromFile` and a `file` parameter:
+```ron
+"MyO16": (n: 16, z: 8, profile: FromFile, file: "o16_configurations.dat"),
+```
+The file contains one configuration per line: `x y z` (fm) for each nucleon, optionally followed by an isospin column (`x y z isospin`, 1 = proton, 0 = neutron). Blank lines and `#` comments are ignored, relative paths are resolved against the working directory, and each event uses a randomly chosen configuration in a random orientation. The `He3`, `H3`, `He4`, `C` and `O` entries use this profile but have no file set yet, so they can't be used until one is added.
 
 # NN Profile Types
 The `omega` parameter controls the nucleon-nucleon interaction profile:

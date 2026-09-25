@@ -1,4 +1,4 @@
-// examples/plot_radius_distribution.rs
+// src/bin/plot_radius_distribution.rs
 use oxy_glauber::TGlauNucleus;
 use oxy_glauber::constants::{PI, TWO_PI};
 use plotters::coord::Shift;
@@ -230,7 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create the nucleus - uses the same lookup table as the main simulation
-    let mut nucleus = TGlauNucleus::new(&nucleus_name);
+    let mut nucleus = TGlauNucleus::new(&nucleus_name)?;
     let mut rng = ThreadRng::default();
 
     // Check if nucleus is valid

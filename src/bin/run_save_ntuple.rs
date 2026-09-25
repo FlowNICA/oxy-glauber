@@ -1,4 +1,4 @@
-// examples/run_save_ntuple.rs
+// src/bin/run_save_ntuple.rs
 use oxiroot::Compression;
 use oxiroot::tree::{Branch, Tree};
 use oxy_glauber::{TGlauberEvent, TGlauberMC};
@@ -190,7 +190,7 @@ fn run_and_save_ntuple(
 ) -> Result<Vec<TGlauberEvent>, Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
 
-    let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, sigwidth, 0.0);
+    let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, sigwidth, 0.0)?;
     glauber.set_min_distance(mind);
     glauber.set_node_distance(noded);
     glauber.set_calc_area(false);

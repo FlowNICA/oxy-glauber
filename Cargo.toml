@@ -20,22 +20,7 @@ rand_chacha = "0.10.0"
 serde = {version = "1.0.229", features = ["derive"] }
 plotters = "0.3.7"
 parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
+ron = "0.12"
 
 [dev-dependencies]
 env_logger = "0.11.11"
-
-[[example]]
-name = "run_glauber"
-path = "examples/run_glauber.rs"
-
-[[example]]
-name = "run_save_ntuple"
-path = "examples/run_save_ntuple.rs"
-
-[[example]]
-name = "run_save_parquet"
-path = "examples/run_save_parquet.rs"
-
-[[example]]
-name = "run_smear_ntuple"
-path = "examples/run_smear_ntuple.rs"

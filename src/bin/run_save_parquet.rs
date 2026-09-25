@@ -1,4 +1,4 @@
-// examples/run_save_parquet.rs
+// src/bin/run_save_parquet.rs
 use oxy_glauber::{TGlauberEvent, TGlauberMC};
 use parquet::basic::{Compression, Encoding, Type as PhysicalType, ZstdLevel};
 use parquet::data_type::FloatType;
@@ -260,7 +260,7 @@ fn run_and_save_parquet(
 ) -> Result<Vec<TGlauberEvent>, Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
 
-    let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, sigwidth, 0.0);
+    let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, sigwidth, 0.0)?;
     glauber.set_min_distance(mind);
     glauber.set_node_distance(noded);
     glauber.set_calc_area(false);
