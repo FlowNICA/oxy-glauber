@@ -198,6 +198,8 @@ pub enum DensityProfile {
     HarmonicOscillator,
     Oxygen1970,
     FromGraph,
+    /// Uniform (hard-sphere) density: rho(r) = 1 for r <= R, 0 for r > R
+    HardSphere,
 }
 
 /// Represents a nucleus in the Glauber model
@@ -265,6 +267,9 @@ impl TGlauNucleus {
             }
             (_, None) => None,
         };
+        if cfg.profile == DensityProfile::HardSphere && cfg.r <= 0.0 {
+            return Err(config_err("profile HardSphere requires a radius `r` > 0"));
+        }
         Ok(Self {
             name: name.to_string(),
             n: cfg.n,
@@ -410,6 +415,11 @@ impl TGlauNucleus {
         numerator / denom
     }
 
+    /// Hard-sphere (uniform) density (unnormalized): rho(r) = 1 for r <= R, 0 for r > R
+    fn hard_sphere_density(r: f64, r_param: f64) -> f64 {
+        if r <= r_param { 1.0 } else { 0.0 }
+    }
+
     /// Double-Gaussian proton density (unnormalized), matching McGlauber fF=10:
     /// rho(r) = (1-p0)/R^3 * exp(-(r/R)^2) + p0/(0.4R)^3 * exp(-(r/(0.4R))^2)
     fn proton_dgaussian_density(r: f64, r_param: f64) -> f64 {
@@ -436,6 +446,7 @@ impl TGlauNucleus {
                 Self::harmonic_oscillator_density(r, self.r, self.a)
             }
             DensityProfile::Oxygen1970 => Self::oxygen_1970_density(r, self.r, self.a, self.w),
+            DensityProfile::HardSphere => Self::hard_sphere_density(r, self.r),
             DensityProfile::ProtonNeutron3PF => {
                 let (r_param, a_param, w_param) = if is_proton {
                     (self.r, self.a, self.w)
@@ -497,6 +508,10 @@ impl TGlauNucleus {
     fn sample_radius<R: Rng>(&mut self, rng: &mut R, is_proton: bool) -> f64 {
         if self.max_r <= 0.0 {
             return 0.0;
+        }
+        // Uniform sphere: invert the CDF (r/R)^3 exactly instead of rejection sampling
+        if self.profile_type == DensityProfile::HardSphere {
+            return self.r.min(self.max_r) * rng.random::<f64>().cbrt();
         }
         let envelope = self.density_envelope(is_proton);
         if envelope <= 0.0 {
@@ -1142,6 +1157,37 @@ mod tests {
         ));
         // Table entries with FromFile but no `file` are rejected when used
         assert!(matches!(TGlauNucleus::new("O"), Err(NucleusError::Config { .. })));
+    }
+
+    #[test]
+    fn hard_sphere_is_uniform_inside_radius() {
+        let cfg: NucleusConfig = parse_ron("(n: 208, z: 82, r: 7.0, profile: HardSphere)").unwrap();
+        let mut nucleus = TGlauNucleus::from_config("test", &cfg).unwrap();
+        assert_eq!(nucleus.radial_density(6.99, true), 1.0);
+        assert_eq!(nucleus.radial_density(7.01, true), 0.0);
+
+        let mut rng = rand::rng();
+        let samples = 200_000;
+        let mut inner = 0;
+        for _ in 0..samples {
+            let r = nucleus.sample_nucleon_radius(&mut rng, true);
+            assert!((0.0..=7.0).contains(&r), "r = {r}");
+            if r < 3.5 {
+                inner += 1;
+            }
+        }
+        // Uniform density: the inner half-radius holds (1/2)^3 = 1/8 of the nucleons
+        let frac = inner as f64 / samples as f64;
+        assert!((frac - 0.125).abs() < 0.005, "fraction inside R/2 = {frac}");
+    }
+
+    #[test]
+    fn hard_sphere_requires_radius() {
+        let cfg: NucleusConfig = parse_ron("(n: 208, z: 82, profile: HardSphere)").unwrap();
+        assert!(matches!(
+            TGlauNucleus::from_config("test", &cfg),
+            Err(NucleusError::Config { .. })
+        ));
     }
 
     #[test]

@@ -245,6 +245,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 # Supported Nuclei
 See `data/nuclei.ron` for the complete list and the parameters of each nucleus. The file is embedded in the library at compile time; to add a nucleus, add an entry there and rebuild. Requesting a name that is not in the file makes `TGlauNucleus::new` / `TGlauberMC::new` return a `NucleusError::Unknown` error.
 
+A uniform hard-sphere density (ρ = const for r ≤ R, 0 for r > R) is available as `profile: HardSphere`, with the sphere radius given by `r`:
+```ron
+"PbHS": (n: 208, z: 82, r: 7.11, profile: HardSphere),
+```
+
 Nucleons can also be taken from precomputed configurations (e.g. from ab-initio calculations) with `profile: FromFile` and a `file` parameter:
 ```ron
 "MyO16": (n: 16, z: 8, profile: FromFile, file: "o16_configurations.dat"),
