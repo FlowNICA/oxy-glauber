@@ -2,6 +2,8 @@
 use oxiroot::Compression;
 use oxiroot::tree::{Branch, Tree};
 use oxy_glauber::{TGlauberEvent, TGlauberMC};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use std::env;
 
 /// Compression applied to every basket of the output TTree.
@@ -185,12 +187,13 @@ fn run_and_save_ntuple(
     mind: f64,
     omega: f64,
     noded: f64,
-    _seed: u64,
+    seed: u64,
     output_file: Option<&str>,
 ) -> Result<Vec<TGlauberEvent>, Box<dyn std::error::Error>> {
-    let mut rng = rand::rng();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let mut glauber = TGlauberMC::new(sys_a, sys_b, signn, sigwidth, 0.0)?;
+    glauber.set_seed(seed);
     glauber.set_min_distance(mind);
     glauber.set_node_distance(noded);
     glauber.set_calc_area(false);

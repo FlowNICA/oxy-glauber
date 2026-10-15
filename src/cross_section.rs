@@ -103,38 +103,56 @@ const HARD_Y: [f64; 37] = [
     830.319702,
 ];
 
+/// Mean nucleon mass (p+n)/2 in GeV, used to convert sqrt(s_NN) to the beam kinetic
+/// energy in the fixed-target frame, which is what the Bystricky tables are indexed by.
+pub const NUCLEON_MASS: f64 = 0.938919;
+
+/// sqrt(s_NN) (GeV) below which no cross section is available: it maps onto Tkin = 0.3 GeV,
+/// the start of the sigma_NP table.
+pub const SQRT_S_MIN: f64 = 2.0223;
+/// sqrt(s_NN) (GeV) up to which the Bystricky tables are used: it maps onto Tkin = 4.2 GeV,
+/// the end of the sigma_NP table. Above it, the arXiv:2011.14909 fit is used instead.
+pub const SQRT_S_TABLE_MAX: f64 = 3.378;
+
 impl CrossSection {
-    /// Get sigma_NN from energy (10 GeV to 100 TeV)
+    /// Beam kinetic energy Tkin (GeV) of a fixed-target nucleon-nucleon collision with the
+    /// given sqrt(s_NN) (GeV): s = 2m(Tkin + 2m).
+    pub fn tkin_from_sqrt_s(sqrt_s: f64) -> f64 {
+        sqrt_s * sqrt_s / (2.0 * NUCLEON_MASS) - 2.0 * NUCLEON_MASS
+    }
+
+    /// Get sigma_NN from sqrt(s_NN) in GeV. The fit from https://arxiv.org/abs/2011.14909
+    /// is valid for 10 GeV to 100 TeV, but is also used as an approximation down to
+    /// `SQRT_S_TABLE_MAX` (the C++ `GetSigmaNNvsEnergy` TF1 is itself defined from 5 GeV).
     pub fn sigma_nn(energy: f64) -> f64 {
-        if energy < 10.0 {
+        if energy < SQRT_S_TABLE_MAX {
             return 0.0;
         }
         let log_s = (energy * energy).ln();
-        // Parameterization from https://arxiv.org/abs/2011.14909
         28.84374 + 0.04584121 * log_s.powf(2.374257)
     }
 
-    /// Get sigma_NP from energy (0.3-4.2 GeV) - Bystricky parameterization, linearly
-    /// interpolated from the real experimental table (Bystricky_JPhysique48 Table VI),
-    /// matching `TGlauberMC::GetSigmaNP_Bystricky`.
-    pub fn sigma_np_bystricky(energy: f64) -> f64 {
-        if energy < 0.3 || energy > 4.2 {
+    /// Get sigma_NP from the beam kinetic energy Tkin (0.3-4.2 GeV) - Bystricky
+    /// parameterization, linearly interpolated from the real experimental table
+    /// (Bystricky_JPhysique48 Table VI), matching `TGlauberMC::GetSigmaNP_Bystricky`.
+    pub fn sigma_np_bystricky(tkin: f64) -> f64 {
+        if tkin < 0.3 || tkin > 4.2 {
             return 0.0;
         }
-        lerp_table(energy, &NP_X, &NP_Y)
+        lerp_table(tkin, &NP_X, &NP_Y)
     }
 
-    /// Get sigma_PP from energy (0.28-425 GeV) - Bystricky parameterization, linearly
-    /// interpolated from the real experimental table (Bystricky_JPhysique48 Table VI),
-    /// matching `TGlauberMC::GetSigmaPP_Bystricky`.
-    pub fn sigma_pp_bystricky(energy: f64) -> f64 {
-        if energy < 0.28 || energy > 425.0 {
+    /// Get sigma_PP from the beam kinetic energy Tkin (0.28-425 GeV) - Bystricky
+    /// parameterization, linearly interpolated from the real experimental table
+    /// (Bystricky_JPhysique48 Table VI), matching `TGlauberMC::GetSigmaPP_Bystricky`.
+    pub fn sigma_pp_bystricky(tkin: f64) -> f64 {
+        if tkin < 0.28 || tkin > 425.0 {
             return 0.0;
         }
-        lerp_table(energy, &PP_X, &PP_Y)
+        lerp_table(tkin, &PP_X, &PP_Y)
     }
 
-    /// Get hard scattering cross section from energy (10 GeV to 100 TeV), linearly
+    /// Get hard scattering cross section from sqrt(s_NN) (10 GeV to 100 TeV), linearly
     /// interpolated from the real HIJING table, matching `TGlauberMC::GetSigmaHard`.
     pub fn sigma_hard(energy: f64) -> f64 {
         if energy < 10.0 {
@@ -143,16 +161,65 @@ impl CrossSection {
         lerp_table(energy, &HARD_X, &HARD_Y)
     }
 
-    /// Compute sigma from beam energy (handles both high and low energy)
-    pub fn from_energy(energy: f64) -> (f64, f64, f64) {
-        if energy < 10.0 {
-            let sig_pp = Self::sigma_pp_bystricky(energy);
-            let sig_np = Self::sigma_np_bystricky(energy);
-            (sig_pp, sig_np, 0.0)
+    /// Compute (sigma_NN, sigma_NP, sigma_hard) in mb from sqrt(s_NN) in GeV:
+    /// - `SQRT_S_MIN`..`SQRT_S_TABLE_MAX`: sigma_PP and sigma_NP from the Bystricky tables,
+    ///   looked up at Tkin (the tables are indexed by beam kinetic energy, not sqrt(s));
+    /// - `SQRT_S_TABLE_MAX`..10: sigma_NN from the arXiv:2011.14909 fit as an
+    ///   approximation, no separate sigma_NP;
+    /// - above 10: the same fit, plus sigma_hard.
+    ///
+    /// Returns `None` below `SQRT_S_MIN`, where no cross section is available.
+    pub fn from_energy(energy: f64) -> Option<(f64, f64, f64)> {
+        if energy < SQRT_S_MIN {
+            None
+        } else if energy <= SQRT_S_TABLE_MAX {
+            // Clamp so rounding in the boundary values can't fall just outside the tables.
+            let tkin = Self::tkin_from_sqrt_s(energy).clamp(0.3, 4.2);
+            Some((Self::sigma_pp_bystricky(tkin), Self::sigma_np_bystricky(tkin), 0.0))
         } else {
-            let sig = Self::sigma_nn(energy);
-            let sig_hard = Self::sigma_hard(energy);
-            (sig, 0.0, sig_hard)
+            Some((Self::sigma_nn(energy), 0.0, Self::sigma_hard(energy)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tkin_conversion_matches_table_bounds() {
+        // The boundaries are rounded to 4 significant digits.
+        assert!((CrossSection::tkin_from_sqrt_s(SQRT_S_MIN) - 0.3).abs() < 5e-3);
+        assert!((CrossSection::tkin_from_sqrt_s(SQRT_S_TABLE_MAX) - 4.2).abs() < 5e-3);
+    }
+
+    #[test]
+    fn from_energy_regions() {
+        assert!(CrossSection::from_energy(2.0).is_none());
+
+        // Table region: both cross sections come from the tables at Tkin, not sqrt(s).
+        let (pp, np, hard) = CrossSection::from_energy(2.4).unwrap();
+        let tkin = CrossSection::tkin_from_sqrt_s(2.4);
+        assert_eq!(pp, CrossSection::sigma_pp_bystricky(tkin));
+        assert_eq!(np, CrossSection::sigma_np_bystricky(tkin));
+        assert!(pp > 20.0 && np > 20.0);
+        assert_eq!(hard, 0.0);
+        for e in [SQRT_S_MIN, SQRT_S_TABLE_MAX] {
+            let (pp, np, _) = CrossSection::from_energy(e).unwrap();
+            assert!(pp > 0.0 && np > 0.0, "sqrt(s)={e}: pp={pp} np={np}");
+        }
+
+        // Approximation region: fit, no separate sigma_NP, roughly continuous with the tables.
+        let (nn, np, hard) = CrossSection::from_energy(5.0).unwrap();
+        assert_eq!(nn, CrossSection::sigma_nn(5.0));
+        assert_eq!((np, hard), (0.0, 0.0));
+        let (nn_edge, _, _) = CrossSection::from_energy(SQRT_S_TABLE_MAX + 1e-9).unwrap();
+        assert!((nn_edge - 29.0).abs() < 1.0);
+
+        // Fit is continuous at 10 GeV, where sigma_hard switches on.
+        let (below, _, _) = CrossSection::from_energy(10.0 - 1e-9).unwrap();
+        let (above, _, hard) = CrossSection::from_energy(10.0).unwrap();
+        assert!((below - above).abs() < 1e-6);
+        assert!(hard > 0.0);
     }
 }

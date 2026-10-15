@@ -7,7 +7,6 @@ use crate::profile::{NNProfile, profile_from_omega};
 use rand::Rng;
 use rand::RngExt;
 use rand::SeedableRng;
-use rand::rngs::ThreadRng;
 use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -246,7 +245,7 @@ struct GlauberConfig {
 }
 
 /// Parameters needed to simulate one event, shared between the single-threaded
-/// (`TGlauberMC::calc_event`) and parallel (`generate_event_with_seed`) code paths.
+/// (`TGlauberMC::calc_event`) and parallel (`generate_event`) code paths.
 struct EventParams<'a> {
     xsect: f64,
     xsect_np: f64,
@@ -873,10 +872,13 @@ pub struct TGlauberMC {
     bc: Vec<Vec<bool>>,
     mpi: [i32; 99],
     config: GlauberConfig,
+    /// Base seed for `run_parallel`; event `i` uses ChaCha8 stream `i` of this seed.
+    seed: u64,
 }
 
 impl TGlauberMC {
-    /// Fails if `na` or `nb` is not a nucleus defined in `data/nuclei.ron`.
+    /// Fails if `na` or `nb` is not a nucleus defined in `data/nuclei.ron`, or if `xsect`
+    /// is an energy (negative) below `cross_section::SQRT_S_MIN`.
     pub fn new(
         na: &str,
         nb: &str,
@@ -894,7 +896,8 @@ impl TGlauberMC {
 
         if xsect < 0.0 {
             let energy = -xsect;
-            let (sig_nn, sig_np, sig_hard) = CrossSection::from_energy(energy);
+            let (sig_nn, sig_np, sig_hard) = CrossSection::from_energy(energy)
+                .ok_or(NucleusError::EnergyOutOfRange(energy))?;
             xsect_use = sig_nn;
             xsect_np_use = if xsect_np <= 0.0 { sig_np } else { xsect_np };
             sig_h = sig_hard;
@@ -966,6 +969,7 @@ impl TGlauberMC {
             bc: Vec::new(),
             mpi: [0; 99],
             config,
+            seed: 42,
         })
     }
 
@@ -988,6 +992,12 @@ impl TGlauberMC {
             self.nn_profile = Some(profile.clone());
             self.config.nn_profile = Some(profile);
         }
+    }
+
+    /// Set the base seed used by `run_parallel` (default 42). Single-threaded runs draw
+    /// from the RNG passed to `run`/`run_save`/`next_event` instead.
+    pub fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
     }
 
     pub fn set_min_distance(&mut self, d: f64) {
@@ -1177,7 +1187,7 @@ impl TGlauberMC {
     }
 
     /// Generate the next event (single-threaded version)
-    pub fn next_event(&mut self, rng: &mut ThreadRng, bgen: Option<f64>) -> bool {
+    pub fn next_event<R: Rng>(&mut self, rng: &mut R, bgen: Option<f64>) -> bool {
         let b = match bgen {
             Some(b) if b >= 0.0 => b,
             _ => {
@@ -1193,7 +1203,7 @@ impl TGlauberMC {
     }
 
     /// Calculate event results
-    fn calc_event(&mut self, rng: &mut ThreadRng, bgen: f64) -> bool {
+    fn calc_event<R: Rng>(&mut self, rng: &mut R, bgen: f64) -> bool {
         let params = EventParams {
             xsect: self.xsect,
             xsect_np: self.xsect_np,
@@ -1228,15 +1238,14 @@ impl TGlauberMC {
         success
     }
 
-    /// Generate a single event with a given seed (for parallel generation).
+    /// Generate a single event from a standalone config (for parallel generation).
     /// Returns the event and the `w` weight used for total-cross-section bookkeeping
     /// (valid whether or not the event succeeded).
-    fn generate_event_with_seed(
+    fn generate_event<R: Rng>(
         config: &GlauberConfig,
-        seed: u64,
+        rng: &mut R,
         bgen: Option<f64>,
     ) -> (TGlauberEvent, f64) {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
         // Names were already validated in `TGlauberMC::new`.
         let mut nucleus_a =
             TGlauNucleus::new(&config.nucleus_a_name).expect("nucleus A validated in new()");
@@ -1256,8 +1265,8 @@ impl TGlauberMC {
             }
         };
 
-        nucleus_a.throw_nucleons(-b / 2.0, &mut rng);
-        nucleus_b.throw_nucleons(b / 2.0, &mut rng);
+        nucleus_a.throw_nucleons(-b / 2.0, rng);
+        nucleus_b.throw_nucleons(b / 2.0, rng);
 
         let params = EventParams {
             xsect: config.xsect,
@@ -1275,15 +1284,17 @@ impl TGlauberMC {
         };
 
         let (event, _bc, _mpi, w) =
-            simulate_event(&params, &mut nucleus_a, &mut nucleus_b, b, &mut rng);
+            simulate_event(&params, &mut nucleus_a, &mut nucleus_b, b, rng);
         (event, w)
     }
 
-    /// Generate events in parallel using all available CPU cores
+    /// Generate events in parallel using all available CPU cores. Event `i` draws from
+    /// stream `i` of a ChaCha8 RNG seeded with `set_seed`'s value, so the output depends
+    /// only on the seed, not on the number of threads.
     pub fn run_parallel(&mut self, nevents: i32, b: Option<f64>) -> Vec<TGlauberEvent> {
         let num_threads = rayon::current_num_threads();
-        let nevents_per_thread = (nevents / num_threads as i32).max(1);
-        let remaining = nevents - nevents_per_thread * num_threads as i32;
+        let nevents_per_thread = nevents / num_threads as i32;
+        let remaining = nevents % num_threads as i32;
 
         println!("╔════════════════════════════════════════════════════════════════╗");
         println!("║                    PARALLEL EVENT GENERATION                   ║");
@@ -1326,6 +1337,7 @@ impl TGlauberMC {
         self.config.xsect_fluct = self.xsect_fluct.clone();
 
         let config = Arc::new(self.config.clone());
+        let seed = self.seed;
 
         use std::sync::atomic::{AtomicUsize, Ordering};
         let progress = AtomicUsize::new(0);
@@ -1349,18 +1361,19 @@ impl TGlauberMC {
                 let mut thread_events = Vec::with_capacity(events_this_thread as usize);
                 let mut thread_total_weight = 0.0;
                 let mut thread_accepted_weight = 0.0;
-                let base_seed = thread_id as u64 * 1000000 + 42;
+                // Threads before this one each got one extra event if thread_id < remaining.
+                let first_event = thread_id as u64 * nevents_per_thread as u64
+                    + thread_id.min(remaining as usize) as u64;
 
                 for i in 0..events_this_thread {
-                    let seed = base_seed + i as u64;
-                    let (mut event, mut w) = TGlauberMC::generate_event_with_seed(&config, seed, b);
+                    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+                    rng.set_stream(first_event + i as u64);
+                    let (mut event, mut w) = TGlauberMC::generate_event(&config, &mut rng, b);
                     thread_total_weight += w;
 
                     let mut attempts = 0;
                     while event.ncoll == 0.0 && attempts < 100 {
-                        let new_seed = seed + 1000000 + attempts as u64;
-                        let (e2, w2) =
-                            TGlauberMC::generate_event_with_seed(&config, new_seed, b);
+                        let (e2, w2) = TGlauberMC::generate_event(&config, &mut rng, b);
                         event = e2;
                         w = w2;
                         thread_total_weight += w;
@@ -1438,7 +1451,7 @@ impl TGlauberMC {
     }
 
     /// Run events (single-threaded, with automatic parallel for large counts)
-    pub fn run(&mut self, nevents: i32, rng: &mut ThreadRng, b: Option<f64>) -> Vec<TGlauberEvent> {
+    pub fn run<R: Rng>(&mut self, nevents: i32, rng: &mut R, b: Option<f64>) -> Vec<TGlauberEvent> {
         if nevents > 10000 {
             println!("⚠️  Large event count detected ({})", nevents);
             println!("🔄 Switching to parallel mode using all available CPU cores...");
@@ -1507,10 +1520,10 @@ impl TGlauberMC {
         events
     }
 
-    pub fn run_save<F>(
+    pub fn run_save<R: Rng, F>(
         &mut self,
         nevents: i32,
-        rng: &mut ThreadRng,
+        rng: &mut R,
         b: Option<f64>,
         mut callback: F,
     ) where

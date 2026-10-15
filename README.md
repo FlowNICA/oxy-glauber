@@ -23,14 +23,15 @@ The code supports a wide range of nuclei, deformation parameters, and nucleon-nu
 ## Features
 
 - **Multiple nucleus types**: Pb, Au, Cu, O, Ne, U, p, d, and many more
-- **Deformed nuclei**: Support for β₂, β₃, β₄ deformation parameters
+- **Deformed nuclei**: Support for β₂, β₃, β₄ deformation parameters and triaxiality γ
 - **NN interaction profiles**: 
   - Hard sphere
   - Gamma distribution (ω parameter)
   - HIJING-based
   - PYTHIA-based
   - TRENTO-based
-- **Energy-dependent cross sections**: Automatic calculation from beam energy
+- **Energy-dependent cross sections**: Automatic calculation from √s_NN, down to 2.02 GeV (see [Energy-Dependent Cross Sections](#energy-dependent-cross-sections))
+- **Reproducible runs**: The same `--seed` gives identical output, in both single- and multi-threaded mode
 - **Multi-threaded parallel execution**: Automatically uses all available CPU cores for large event counts
 - **ROOT output**: Write results directly to LZMA-compressed ROOT TTrees using the [`oxiroot`](https://github.com/mathieuouillon/oxiroot) crate
 - **Parquet output**: Write results to size-optimized Apache Parquet files using the `parquet` crate
@@ -75,11 +76,20 @@ cargo run --release --bin run_save_ntuple -- \
     --output my_output.root
 ```
 
-### Run with energy instead of cross section (signn negative = energy in GeV)
+### Run with energy instead of cross section (signn negative = √s_NN in GeV)
 ```bash
 cargo run --release --bin run_save_ntuple -- \
     --nevents 1000 \
     --signn -5360  # 5.36 TeV
+```
+
+### Run at low energy with a fixed seed
+```bash
+cargo run --release --bin run_save_ntuple -- \
+    --nevents 1000 \
+    --sysA Au --sysB Au \
+    --signn -2.4 \
+    --seed 123
 ```
 
 ### Run with default parameters, saving to Apache Parquet instead of ROOT
@@ -127,10 +137,10 @@ accept the same option names, though a few defaults differ per binary:
 | `--nevents N`   | Number of events to generate | 10000 (1000 for `run_glauber`/`run_smear_ntuple`) |
 | `--sysA NAME`   | Name of nucleus A | Pbpnrw (Pb for `run_glauber`) |
 | `--sysB NAME`   | Name of nucleus B | Pbpnrw (Pb for `run_glauber`) |
-| `--signn VAL`   | σ_NN in mb (negative = beam energy in GeV) | 68.0 |
+| `--signn VAL`   | σ_NN in mb (negative = √s_NN in GeV, must be ≥ 2.0223) | 68.0 |
 | `--mind VAL`    | Minimum nucleon distance in fm | 0.4 |
 | `--omega VAL`   | Omega parameter for NN profile | 0.0/hard sphere for `run_save_ntuple`/`run_save_parquet`, 0.3/Gamma for `run_glauber`/`run_smear_ntuple` |
-| `--seed VAL`    | Random seed | 42 |
+| `--seed VAL`    | Random seed; the same seed reproduces the same output | 42 |
 | `--output FILE` | Output file name | Auto-generated from run parameters (fixed `glauber_output.root` for `run_glauber`) |
 | `--help`        | Print help message | - |
 
@@ -148,7 +158,7 @@ Additional options for specific binaries:
 - **Automatic detection**: When generating more than 10,000 events, the code automatically switches to parallel mode
 - **Maximum thread usage**: Uses all available CPU cores
 - **Even distribution**: Events are evenly distributed across threads
-- **Deterministic results**: Each thread uses a deterministic seed based on thread ID and event index
+- **Deterministic results**: Event *i* draws from stream *i* of a ChaCha8 RNG seeded with `--seed` (`TGlauberMC::set_seed`), so the output depends only on the seed, not on the number of threads. Single-threaded runs use the RNG passed to `run`, so the two modes give different (but each reproducible) events for the same seed
 - **Progress reporting**: Shows real-time progress with generation rate and elapsed time
 
 ## Performance Example
@@ -210,9 +220,12 @@ For smaller event counts or debugging, the code runs in single-threaded mode:
 # Using as a Library
 ```rust
 use oxy_glauber::TGlauberMC;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut rng = rand::rng();
+    // Any `rand::Rng` works; a seeded one makes single-threaded runs reproducible
+    let mut rng = ChaCha8Rng::seed_from_u64(42);
     
     // Create Glauber model for Pb+Pb at 5.02 TeV (energy -> cross section)
     let mut glauber = TGlauberMC::new("Pb", "Pb", -5020.0, 0.0, 0.0)?;
@@ -221,6 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     glauber.set_min_distance(0.4);
     glauber.set_omega(0.3);  // Gamma distribution for NN profile
     glauber.set_bmax(20.0);
+    glauber.set_seed(42);  // seed for parallel mode
     
     // Generate events (automatically uses parallel mode for >10000 events)
     let nevents = 100000;
@@ -254,7 +268,24 @@ Nucleons can also be taken from precomputed configurations (e.g. from ab-initio 
 ```ron
 "MyO16": (n: 16, z: 8, profile: FromFile, file: "o16_configurations.dat"),
 ```
+Deformed nuclei with `profile: DeformedBox` take `beta2`, `beta3`, `beta4` and the triaxiality angle `gamma` (radians). With `gamma` ≠ 0 the β₂ term becomes cos γ·Y₂₀ + sin γ·√(15/64π)·sin²θ·cos 2φ, as in TGlauberMC:
+```ron
+"MyNeTri": (n: 20, z: 10, r: 2.7243, a: 0.4982, beta2: 0.4899, gamma: 0.5236, max_r: 10.0, profile: DeformedBox),
+```
+
 The file contains one configuration per line: `x y z` (fm) for each nucleon, optionally followed by an isospin column (`x y z isospin`, 1 = proton, 0 = neutron). Blank lines and `#` comments are ignored, relative paths are resolved against the working directory, and each event uses a randomly chosen configuration in a random orientation. The `He3`, `H3`, `He4`, `C` and `O` entries use this profile but have no file set yet, so they can't be used until one is added.
+
+# Energy-Dependent Cross Sections
+A negative `--signn` (or `xsect` in `TGlauberMC::new`) is read as √s_NN in GeV, and the cross sections are derived from it:
+
+| √s_NN (GeV) | σ_NN | σ_NP |
+|-------------|------|------|
+| < 2.0223 | not available: `TGlauberMC::new` returns `NucleusError::EnergyOutOfRange` | – |
+| 2.0223 – 3.378 | σ_pp from the Bystricky table | σ_np from the Bystricky table (used for np pairs) |
+| 3.378 – 10 | Approximation: the [arXiv:2011.14909](https://arxiv.org/abs/2011.14909) fit | Same as σ_NN |
+| ≥ 10 | The [arXiv:2011.14909](https://arxiv.org/abs/2011.14909) fit, plus σ_hard from HIJING | Same as σ_NN |
+
+The Bystricky tables (J. Physique 48, Table VI) are given as a function of the beam kinetic energy in the fixed-target frame, so √s_NN is first converted with T_kin = s/(2m_N) − 2m_N (m_N = 0.938919 GeV, the mean nucleon mass). The range 2.0223–3.378 GeV corresponds to T_kin = 0.3–4.2 GeV, the extent of the σ_np table. Above it, the fit is used as an approximation; it agrees with the tables to within ~1 mb at 3.378 GeV and is continuous at 10 GeV.
 
 # NN Profile Types
 The `omega` parameter controls the nucleon-nucleon interaction profile:

@@ -2,6 +2,8 @@
 use oxiroot::Compression;
 use oxiroot::tree::{Branch, Tree};
 use oxy_glauber::TGlauberMC;
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use std::env;
 
 fn print_usage() {
@@ -148,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, _seed, output) = parse_args()?;
+    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output) = parse_args()?;
 
     println!("=== Oxy-Glauber v{} ===", oxy_glauber::VERSION);
     println!("Simulation parameters:");
@@ -162,9 +164,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Output: {}", output);
     println!();
 
-    let mut rng = rand::rng();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let mut glauber = TGlauberMC::new(&sys_a, &sys_b, signn, 0.0, 0.0)?;
+    glauber.set_seed(seed);
     glauber.set_min_distance(mind);
     glauber.set_omega(omega);
     glauber.set_bmin(bmin);
