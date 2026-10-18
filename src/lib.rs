@@ -3,6 +3,7 @@
 
 pub mod cross_section;
 pub mod glauber;
+pub mod glauber3d;
 pub mod nucleon;
 pub mod nucleus;
 pub mod profile;
@@ -10,6 +11,9 @@ pub mod random;
 
 pub use cross_section::CrossSection;
 pub use glauber::{TGlauberEvent, TGlauberMC};
+pub use glauber3d::{
+    Column3D, ConfigError, Event3D, Glauber3D, Glauber3DParams, RunConfig, TATB_LABELS,
+};
 pub use nucleon::TGlauNucleon;
 pub use nucleus::{NucleusError, TGlauNucleus};
 pub use profile::{NNProfile, NNProfileType, profile_from_omega};

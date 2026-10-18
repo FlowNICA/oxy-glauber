@@ -1,0 +1,88 @@
+// Run configuration for the oxy-glauber binaries, passed with `--config`:
+//   cargo run --release --bin run_save_ntuple -- --sysA Au --sysB Au --signn 42 --config config/run_3d.ron
+//
+// `three_d` toggles the 3D Glauber mode, which follows 3dMCGlauber
+// (https://github.com/FlowNICA/3dMCGlauber) at the nucleon level (no valence quarks):
+//   false - standard McGlauber mode (the default, also used without --config)
+//   true  - 3D mode:
+//     * NN collisions with probability 1 - exp(-sigma_eff*T_nn(b)) for Gaussian nucleons,
+//       calibrated to sigma_NN, instead of the black disk / omega NN profile;
+//     * a time-ordered collision cascade of the Lorentz-contracted nuclei, in which
+//       collisions produce QCD strings and decelerate the nucleons, giving the executed
+//       collisions (NcollExec) and the number of strings (Nstrings);
+//     * eccentricities of Gaussian-smeared participant densities built from T_A and T_B,
+//       and of the string energy density as a function of eta_s.
+// Ncoll, Npart and Ecc1-5 keep their standard-mode meaning (colliding pairs, wounded
+// nucleons, point-participant eccentricities), with the 3D collision probability.
+//
+// Every parameter below is optional; the values shown are the defaults, which are those
+// of 3dMCGlauber's `input` file. Unknown names are rejected.
+(
+    three_d: true,
+    three_d_params: (
+        // Collision energy sqrt(s_NN) in GeV; sets the beam rapidity
+        roots: 200.0,
+        // false: use the run's sigma_NN (--signn); true: 3dMCGlauber's parameterization
+        // of the inelastic sigma_NN at `roots` (40.8 mb at 200 GeV, 67.6 mb at 5.02 TeV)
+        sigma_nn_from_roots: false,
+
+        // --- string production ---
+        // Suppression of strings from multiple scatterings, in [0, 1]
+        shadowing_factor: 0.6,
+        // Order in which collisions are offered strings:
+        // 1 = random, 2 = anti-time ordered, other = time ordered
+        string_production_mode: 1,
+
+        // --- rapidity loss of the colliding nucleons ---
+        // 1 = LEXUS, 2 = parameterization, 3 = parameterization with logit-normal
+        // fluctuations, 4 = piecewise linear with logit-normal fluctuations
+        rapidity_loss_method: 4,
+        // methods 2/3: y_loss = slope * (y^a * tanh(y))^b with a = alpha/(1 - alpha),
+        // alpha = alpha2/alpha1, b = alpha2/a
+        yloss_param_slope: 1.32,
+        yloss_param_alpha1: 1.8,
+        yloss_param_alpha2: 0.35,
+        // logit-normal widths at RHIC (y <= 5.5, method 3) and LHC (y >= 8, methods 3
+        // and 4) energies, interpolated in between
+        yloss_param_fluct_var_rhic: 0.6,
+        yloss_param_fluct_var_lhc: 0.6,
+        // method 4: mean y_loss at y_init = 2, 4, 6, (8), 10; at8 defaults to the mean
+        // of at6 and at10
+        yloss_param4_at2: 1.70,
+        yloss_param4_at4: 2.00,
+        yloss_param4_at6: 2.20,
+        // yloss_param4_at8: 2.575,
+        yloss_param4_at10: 2.95,
+        // method 4: logit-normal width at RHIC energies
+        yloss_param4_var: 0.5,
+
+        // --- string evolution ---
+        // 1 = fixed rapidity loss, 2 = tau_form and m/sigma fluctuate,
+        // 3 = tau_form fluctuates, 4 = m/sigma fluctuates
+        string_evolution_mode: 4,
+        // mean string formation time in fm, and the gamma-distribution parameter of
+        // its fluctuations (mode 2)
+        tau_form_mean: 0.5,
+        tau_form_fluct_gamma_beta: 1.0,
+
+        // --- eccentricities ---
+        // Compute the 3D string energy density, dE/deta_s and eps_n(eta_s). This is the
+        // slow part of the 3D mode; with false only the cascade and the T_A/T_B
+        // eccentricities are computed.
+        eccentricity_eta: true,
+        // Highest harmonic n of eps_n (1-9)
+        max_order: 3,
+        // Transverse grid: grid_nx x grid_nx cells of grid_dx fm (from -nx*dx/2)
+        grid_nx: 100,
+        grid_dx: 0.2,
+        // eta_s grid: grid_neta cells of grid_deta (from -neta*deta/2)
+        grid_neta: 72,
+        grid_deta: 0.2,
+        // Gaussian smearing widths in the transverse plane (fm) and in eta_s
+        sigma_x: 0.4,
+        sigma_eta: 0.5,
+        // Tilt of the strings in the transverse plane along eta_s, as a fraction of
+        // the transverse separation of their ends
+        string_transverse_shift_frac: 0.0,
+    ),
+)

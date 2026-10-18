@@ -79,7 +79,7 @@ fn default_smax() -> f64 {
 
 /// Parse RON with `implicit_some`, so optional fields are written `file: "..."`
 /// rather than `file: Some("...")`.
-fn parse_ron<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, ron::error::SpannedError> {
+pub(crate) fn parse_ron<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, ron::error::SpannedError> {
     ron::Options::default()
         .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
         .from_str(text)

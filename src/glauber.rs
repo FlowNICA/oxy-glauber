@@ -1,6 +1,7 @@
 // src/glauber.rs
 use crate::constants::{MB_TO_FM2, PI, TWO_PI};
 use crate::cross_section::CrossSection;
+use crate::glauber3d::{ConfigError, Event3D, Glauber3D, Glauber3DParams, RunConfig};
 use crate::nucleon::TGlauNucleon;
 use crate::nucleus::{NucleusError, TGlauNucleus};
 use crate::profile::{NNProfile, profile_from_omega};
@@ -69,6 +70,8 @@ pub struct TGlauberEvent {
     pub theta_a: f32,
     pub phi_b: f32,
     pub theta_b: f32,
+    /// Results of the 3D Glauber mode (`None` in the standard mode)
+    pub three_d: Option<Box<Event3D>>,
 }
 
 impl Default for TGlauberEvent {
@@ -127,6 +130,7 @@ impl Default for TGlauberEvent {
             theta_a: 0.0,
             phi_b: 0.0,
             theta_b: 0.0,
+            three_d: None,
         }
     }
 }
@@ -243,6 +247,7 @@ struct GlauberConfig {
     sig_h: f64,
     nn_profile: Option<NNProfile>,
     xsect_fluct: Option<FluctuatingXSect>,
+    three_d: Option<Arc<Glauber3D>>,
 }
 
 /// Parameters needed to simulate one event, shared between the single-threaded
@@ -260,6 +265,22 @@ struct EventParams<'a> {
     do_aagg: bool,
     nn_profile: Option<&'a NNProfile>,
     xsect_fluct: Option<&'a FluctuatingXSect>,
+    three_d: Option<&'a Glauber3D>,
+}
+
+impl EventParams<'_> {
+    /// In the 3D mode the Gaussian collision probability (with its own sigma_NN)
+    /// replaces the NN profile, the cross-section fluctuations and the separate pn
+    /// cross section of the standard mode.
+    fn for_mode(mut self) -> Self {
+        if let Some(g3) = self.three_d {
+            self.xsect = g3.sigma_nn();
+            self.xsect_np = 0.0;
+            self.nn_profile = None;
+            self.xsect_fluct = None;
+        }
+        self
+    }
 }
 
 /// Simulate one Glauber event on already-thrown nuclei, mirroring
@@ -346,18 +367,25 @@ fn simulate_event<R: Rng>(
                 let dy = nucleon_b.y() - nucleon_a.y();
                 let dij = dx * dx + dy * dy;
 
-                let d2 = if params.xsect_np > 0.0 {
-                    if t_a != t_b { d2np } else { d2pp }
-                } else if params.do_aagg && !xsec_a.is_empty() {
-                    0.5 * (xsec_a[j] + xsec_b[i]) * MB_TO_FM2 / PI
-                } else {
-                    d2_base
-                };
-
-                if dij > d2 {
-                    continue;
-                }
                 let bij = dij.sqrt();
+                if let Some(g3) = params.three_d {
+                    // 3D mode: Gaussian collision probability instead of the black disk
+                    // or NN profile
+                    if rng.random::<f64>() >= g3.hit_probability(dij) {
+                        continue;
+                    }
+                } else {
+                    let d2 = if params.xsect_np > 0.0 {
+                        if t_a != t_b { d2np } else { d2pp }
+                    } else if params.do_aagg && !xsec_a.is_empty() {
+                        0.5 * (xsec_a[j] + xsec_b[i]) * MB_TO_FM2 / PI
+                    } else {
+                        d2_base
+                    };
+                    if dij > d2 {
+                        continue;
+                    }
+                }
 
                 if let Some(profile) = params.nn_profile {
                     let val = profile.eval(bij);
@@ -464,6 +492,10 @@ fn simulate_event<R: Rng>(
     }
 
     calc_participants(params, nucleus_a, nucleus_b, &mut event);
+
+    if let Some(g3) = params.three_d {
+        event.three_d = Some(Box::new(g3.process_event(nucleus_a, nucleus_b, &bc, rng)));
+    }
 
     if event.npart > 0.0 {
         if params.calc_area {
@@ -872,6 +904,7 @@ pub struct TGlauberMC {
     event: TGlauberEvent,
     bc: Vec<Vec<bool>>,
     mpi: [i32; 99],
+    three_d: Option<Arc<Glauber3D>>,
     config: GlauberConfig,
 }
 
@@ -938,6 +971,7 @@ impl TGlauberMC {
             sig_h,
             nn_profile: None,
             xsect_fluct: xsect_fluct.clone(),
+            three_d: None,
         };
 
         Ok(Self {
@@ -965,6 +999,7 @@ impl TGlauberMC {
             event: TGlauberEvent::default(),
             bc: Vec::new(),
             mpi: [0; 99],
+            three_d: None,
             config,
         })
     }
@@ -1055,6 +1090,54 @@ impl TGlauberMC {
     pub fn set_sigma_hard(&mut self, s: f64) {
         self.sig_h = s;
         self.config.sig_h = s;
+    }
+
+    /// Switch to the 3D Glauber mode (see `glauber3d`). Unless
+    /// `params.sigma_nn_from_roots` is set, it uses the sigma_NN this run was created
+    /// with; the NN profile (`set_omega`), cross-section fluctuations and separate pn
+    /// cross section are not used in this mode.
+    pub fn set_three_d(&mut self, params: Glauber3DParams) -> Result<(), ConfigError> {
+        let g3 = Glauber3D::new(params, self.xsect)?;
+        println!(
+            "3D Glauber mode: sqrt(s)={} GeV, y_beam={:.3}, sigma_NN={:.2} mb, nucleon width={:.3} fm, sigma_eff={:.3} fm^2",
+            g3.params().roots,
+            g3.ybeam(),
+            g3.sigma_nn(),
+            g3.width(),
+            g3.sigma_eff()
+        );
+        let at_roots = crate::glauber3d::sigma_nn_inel(g3.params().roots);
+        if (g3.sigma_nn() / at_roots - 1.0).abs() > 0.1 {
+            println!(
+                "Note: sigma_NN={:.1} mb differs from 3dMCGlauber's {:.1} mb at sqrt(s)={} GeV; \
+                 set `roots` to the collision energy or use `sigma_nn_from_roots: true`",
+                g3.sigma_nn(),
+                at_roots,
+                g3.params().roots
+            );
+        }
+        self.three_d = Some(Arc::new(g3));
+        Ok(())
+    }
+
+    /// Back to the standard mode
+    pub fn unset_three_d(&mut self) {
+        self.three_d = None;
+    }
+
+    /// Apply a run configuration file: switches the 3D mode on if `three_d` is set
+    pub fn apply_run_config(&mut self, config: &RunConfig) -> Result<(), ConfigError> {
+        if config.three_d {
+            self.set_three_d(config.three_d_params.clone())
+        } else {
+            self.unset_three_d();
+            Ok(())
+        }
+    }
+
+    /// The 3D mode, if active
+    pub fn three_d(&self) -> Option<&Glauber3D> {
+        self.three_d.as_deref()
     }
 
     pub fn nucleus_a(&self) -> &TGlauNucleus {
@@ -1207,7 +1290,9 @@ impl TGlauberMC {
             do_aagg: self.do_aagg,
             nn_profile: self.nn_profile.as_ref(),
             xsect_fluct: self.xsect_fluct.as_ref(),
-        };
+            three_d: self.three_d.as_deref(),
+        }
+        .for_mode();
 
         let (event, bc, mpi, w) =
             simulate_event(&params, &mut self.nucleus_a, &mut self.nucleus_b, bgen, rng);
@@ -1272,7 +1357,9 @@ impl TGlauberMC {
             do_aagg: config.do_aagg,
             nn_profile: config.nn_profile.as_ref(),
             xsect_fluct: config.xsect_fluct.as_ref(),
-        };
+            three_d: config.three_d.as_deref(),
+        }
+        .for_mode();
 
         let (event, _bc, _mpi, w) =
             simulate_event(&params, &mut nucleus_a, &mut nucleus_b, b, &mut rng);
@@ -1324,6 +1411,7 @@ impl TGlauberMC {
         self.config.sig_h = self.sig_h;
         self.config.nn_profile = self.nn_profile.clone();
         self.config.xsect_fluct = self.xsect_fluct.clone();
+        self.config.three_d = self.three_d.clone();
 
         let config = Arc::new(self.config.clone());
 
@@ -1586,15 +1674,27 @@ impl TGlauberMC {
     }
 
     pub fn str(&self) -> String {
-        format!(
-            "TGlauberMC_{}_{}_snn{:.1}_md{:.1}_om{:.1}_rc{}_smax{}",
-            self.nucleus_a.name(),
-            self.nucleus_b.name(),
-            self.xsect,
-            self.nucleus_a.min_dist(),
-            self.omega,
-            self.nucleus_a.recenter(),
-            self.nucleus_a.smax()
-        )
+        match self.three_d() {
+            Some(g3) => format!(
+                "TGlauberMC3D_{}_{}_rs{}_snn{:.1}_md{:.1}_rc{}_smax{}",
+                self.nucleus_a.name(),
+                self.nucleus_b.name(),
+                g3.params().roots,
+                g3.sigma_nn(),
+                self.nucleus_a.min_dist(),
+                self.nucleus_a.recenter(),
+                self.nucleus_a.smax()
+            ),
+            None => format!(
+                "TGlauberMC_{}_{}_snn{:.1}_md{:.1}_om{:.1}_rc{}_smax{}",
+                self.nucleus_a.name(),
+                self.nucleus_b.name(),
+                self.xsect,
+                self.nucleus_a.min_dist(),
+                self.omega,
+                self.nucleus_a.recenter(),
+                self.nucleus_a.smax()
+            ),
+        }
     }
 }

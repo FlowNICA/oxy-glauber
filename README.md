@@ -31,6 +31,7 @@ The code supports a wide range of nuclei, deformation parameters, and nucleon-nu
   - PYTHIA-based
   - TRENTO-based
 - **Energy-dependent cross sections**: Automatic calculation from beam energy
+- **3D Glauber mode** (optional, toggled in a run configuration file): Gaussian NN collision probability, time-ordered collision cascade with QCD string production, and eccentricities of smeared participant densities and of the string energy density vs. η_s, following [3dMCGlauber](https://github.com/FlowNICA/3dMCGlauber)
 - **Multi-threaded parallel execution**: Automatically uses all available CPU cores for large event counts
 - **ROOT output**: Write results directly to LZMA-compressed ROOT TTrees using the [`oxiroot`](https://github.com/mathieuouillon/oxiroot) crate
 - **Parquet output**: Write results to size-optimized Apache Parquet files using the `parquet` crate
@@ -132,6 +133,7 @@ accept the same option names, though a few defaults differ per binary:
 | `--omega VAL`   | Omega parameter for NN profile | 0.0/hard sphere for `run_save_ntuple`/`run_save_parquet`, 0.3/Gamma for `run_glauber`/`run_smear_ntuple` |
 | `--seed VAL`    | Random seed | 42 |
 | `--output FILE` | Output file name | Auto-generated from run parameters (fixed `glauber_output.root` for `run_glauber`) |
+| `--config FILE` | Run configuration file (RON), toggles the [3D Glauber mode](#3d-glauber-mode) | none (standard mode) |
 | `--help`        | Print help message | - |
 
 Additional options for specific binaries:
@@ -267,6 +269,76 @@ The `omega` parameter controls the nucleon-nucleon interaction profile:
 | 8 |	PYTHIA | Based on PYTHIA model |
 | 9 ≤ ω < 11 |	TRENTO | w = omega - 9 |
 
+# 3D Glauber Mode
+Besides the standard (TGlauberMC) treatment of the collision, every binary can run a 3D
+Glauber mode that follows [3dMCGlauber](https://github.com/FlowNICA/3dMCGlauber) at the
+nucleon level (no valence quarks). It is switched on and off in a run configuration file
+passed with `--config`; without `--config` (or with `three_d: false`) the standard mode
+is used:
+```bash
+cargo run --release --bin run_save_ntuple -- --sysA Au --sysB Au --signn 42 --config config/run_3d.ron
+```
+```ron
+(
+    three_d: true,          // false = standard mode
+    three_d_params: (
+        roots: 200.0,       // sqrt(s_NN) in GeV, sets the beam rapidity
+        // ... see config/run_3d.ron for all parameters and their defaults
+    ),
+)
+```
+[`config/run_3d.ron`](config/run_3d.ron) documents every parameter; all are optional and
+default to the values of 3dMCGlauber's `input` file. The nuclei are thrown as in the
+standard mode (from `data/nuclei.ron`). In the 3D mode:
+- **Collision criterion**: two nucleons collide with probability
+  1 − exp(−σ_eff T_nn(b)), with T_nn the overlap of two Gaussian nucleons of width
+  w = √(σ_NN/π)/√8 and σ_eff fixed so that the probability integrates to σ_NN. This
+  replaces the black disk and the `--omega` NN profiles (cross-section fluctuations and
+  a separate σ_pn are not used either). σ_NN is the run's `--signn`, or 3dMCGlauber's
+  parameterization at `roots` with `sigma_nn_from_roots: true`.
+- **Collision cascade**: the nuclei are Lorentz-contracted, placed just apart along the
+  beam axis (A moving in +z) and propagated; the collisions of the colliding pairs are
+  executed in time order. Collisions produce QCD strings (every participant gets at
+  least one, further ones are suppressed by `shadowing_factor`), and each string
+  decelerates its two nucleons by a sampled rapidity loss, which shifts their later
+  collisions. The strings then evolve over their formation time.
+- **Eccentricities** are computed on a transverse grid from Gaussian-smeared densities
+  (σ_x = 0.4 fm): from the participant thickness functions T_A and T_B in six
+  combinations, and from the 3D energy density deposited by the strings and remnants,
+  per η_s cell.
+
+`Npart`, `Ncoll`, `Ecc1`–`Ecc5`, etc. keep their standard meaning (wounded nucleons,
+colliding pairs, point-participant eccentricities), now with the 3D collision
+probability. The ROOT tree and the Parquet file get these extra columns:
+
+| Column | Description |
+|--------|-------------|
+| `NcollExec` | Collisions executed in the time-ordered cascade (3dMCGlauber's reported Ncoll) |
+| `Nstrings` | Number of strings (3dMCGlauber's centrality estimator) |
+| `TransArea` | π·x_rms·y_rms of the string production points (fm²) |
+| `Ecc{n}_{w}`, `Psi{n}_{w}` | ε_n and Ψ_n of the participant density `w` = `TAplusTB`, `sqrtTATB`, `TATB23` ((T_A T_B)^(2/3)), `TATB`, `TA`, `TB`, for n = 1…`max_order` |
+| `dEdEtas[N]` | dE/dη_s (GeV) in each η_s cell |
+| `EccEta{n}[N]`, `PsiEta{n}[N]` | ε_n(η_s) and Ψ_n(η_s) of the string energy density |
+
+The `[N]` columns are fixed-size arrays with one entry per η_s cell (`grid_neta`, 72 by
+default), only written with `eccentricity_eta: true`. The cell centers are stored in the
+one-entry tree `glauber3d_grid` (branch `EtaS`) of the ROOT file, and in the `EtaS`
+key-value metadata of the Parquet file. ε_n uses the weight r³ for n = 1 and rⁿ
+otherwise, and Ψ_n the same convention as `Psi1`–`Psi5`.
+
+The 3D mode is much slower than the standard one: about 12 ms of CPU time per
+minimum-bias Au+Au event at 200 GeV, or about 4 ms with `eccentricity_eta: false`
+(cascade and T_A/T_B eccentricities only, without the 3D energy density), against
+0.25 ms in the standard mode.
+
+Differences from 3dMCGlauber: valence quarks, baryon/charge transport and the beam
+remnant strings (which 3dMCGlauber only outputs with valence quarks) are not
+implemented; two nucleons that have just collided are only rescheduled if they are
+still more than 1e-10 fm apart along the beam axis, so that rounding in the propagation
+can't make them collide again immediately (3dMCGlauber only requires a positive
+collision time); and the energy of a string lying entirely outside the η_s grid is
+dropped instead of turning into NaN.
+
 # Output Format
 Results are written to ROOT files as TTrees with the following branches:
 - `Npart`, `Ncoll`, `Nhard`, `Nmpi`: Multiplicity and collision counters
@@ -318,6 +390,10 @@ This implementation is based on the TGlauberMC C++ code:
 - "Glauber predictions for oxygen and neon collisions at the LHC", https://arxiv.org/abs/2507.05853
 - "Improved Monte Carlo Glauber predictions at present and future nuclear colliders", https://arxiv.org/abs/1710.07098
 - "Improved version of the PHOBOS Glauber Monte Carlo", https://arxiv.org/abs/1408.2549
+
+The 3D Glauber mode follows 3dMCGlauber:
+- 3dMCGlauber: https://github.com/FlowNICA/3dMCGlauber
+- C. Shen and B. Schenke, "Dynamical initial state model for relativistic heavy-ion collisions", https://arxiv.org/abs/1710.00881
 
 # License
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.

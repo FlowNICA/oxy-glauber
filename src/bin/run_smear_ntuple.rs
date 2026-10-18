@@ -1,7 +1,7 @@
 // src/bin/run_smear_ntuple.rs
 use oxiroot::Compression;
 use oxiroot::tree::{Branch, Tree};
-use oxy_glauber::{TGlauberEvent, TGlauberMC};
+use oxy_glauber::{RunConfig, TGlauberEvent, TGlauberMC};
 use std::env;
 
 fn print_usage() {
@@ -17,6 +17,8 @@ fn print_usage() {
     println!("  --bmax VAL        Maximum impact parameter in fm (default: 20.0)");
     println!("  --seed VAL        Random seed (default: 42)");
     println!("  --output FILE     Output file name (default: auto-generated)");
+    println!("  --config FILE     Run configuration file (RON), e.g. config/run_3d.ron, which");
+    println!("                    toggles the 3D Glauber mode (default: none = standard mode)");
     println!("  --help            Print this help message");
     println!();
     println!("Note: If signn is negative, it is interpreted as beam energy in GeV");
@@ -34,6 +36,7 @@ fn parse_args() -> Result<
         f64,
         u64,
         Option<String>,
+        Option<String>,
     ),
     String,
 > {
@@ -49,6 +52,7 @@ fn parse_args() -> Result<
     let mut bmax = 20.0;
     let mut seed = 42;
     let mut output = None;
+    let mut config = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -137,6 +141,13 @@ fn parse_args() -> Result<
                 }
                 output = Some(args[i].clone());
             }
+            "--config" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --config".to_string());
+                }
+                config = Some(args[i].clone());
+            }
             "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -149,7 +160,7 @@ fn parse_args() -> Result<
     }
 
     Ok((
-        nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output,
+        nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output, config,
     ))
 }
 
@@ -175,6 +186,7 @@ fn run_and_smear_ntuple(
     bmax: f64,
     _seed: u64,
     output_file: Option<&str>,
+    config: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
 
@@ -183,6 +195,9 @@ fn run_and_smear_ntuple(
     glauber.set_omega(omega);
     glauber.set_bmin(bmin);
     glauber.set_bmax(bmax);
+    if let Some(path) = config {
+        glauber.apply_run_config(&RunConfig::from_file(path)?)?;
+    }
 
     let name = format!("{}_smeared.root", glauber.str());
     let filename = output_file.unwrap_or(&name);
@@ -240,7 +255,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output) = parse_args()?;
+    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output, config) =
+        parse_args()?;
 
     println!("=== Oxy-Glauber v{} ===", oxy_glauber::VERSION);
     println!("Simulation parameters:");
@@ -256,6 +272,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Output: {}",
         output.as_deref().unwrap_or("auto-generated")
     );
+    println!(
+        "  Run config: {}",
+        config.as_deref().unwrap_or("none (standard mode)")
+    );
     println!();
 
     run_and_smear_ntuple(
@@ -269,6 +289,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bmax,
         seed,
         output.as_deref(),
+        config.as_deref(),
     )?;
 
     Ok(())

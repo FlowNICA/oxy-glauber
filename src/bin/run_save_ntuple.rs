@@ -1,7 +1,9 @@
 // src/bin/run_save_ntuple.rs
 use oxiroot::Compression;
+use oxiroot::file::FileWriter;
 use oxiroot::tree::{Branch, Tree};
-use oxy_glauber::{TGlauberEvent, TGlauberMC};
+use oxy_glauber::glauber3d::output_columns;
+use oxy_glauber::{Column3D, RunConfig, TGlauberEvent, TGlauberMC};
 use std::env;
 
 /// Compression applied to every basket of the output TTree.
@@ -36,6 +38,8 @@ fn print_usage() {
     );
     println!("  --seed VAL        Random seed (default: 42)");
     println!("  --output FILE     Output file name (default: auto-generated)");
+    println!("  --config FILE     Run configuration file (RON), e.g. config/run_3d.ron, which");
+    println!("                    toggles the 3D Glauber mode (default: none = standard mode)");
     println!("  --help            Print this help message");
     println!();
     println!("Note: If signn is negative, it is interpreted as beam energy in GeV");
@@ -52,6 +56,7 @@ fn parse_args() -> Result<
         f64,
         f64,
         u64,
+        Option<String>,
         Option<String>,
     ),
     String,
@@ -71,6 +76,7 @@ fn parse_args() -> Result<
     let mut noded = -1.0;
     let mut seed = 42;
     let mut output = None;
+    let mut config = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -159,6 +165,13 @@ fn parse_args() -> Result<
                 }
                 output = Some(args[i].clone());
             }
+            "--config" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --config".to_string());
+                }
+                config = Some(args[i].clone());
+            }
             "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -171,7 +184,7 @@ fn parse_args() -> Result<
     }
 
     Ok((
-        nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output,
+        nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output, config,
     ))
 }
 
@@ -187,6 +200,7 @@ fn run_and_save_ntuple(
     noded: f64,
     _seed: u64,
     output_file: Option<&str>,
+    config: Option<&str>,
 ) -> Result<Vec<TGlauberEvent>, Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
 
@@ -200,6 +214,9 @@ fn run_and_save_ntuple(
 
     if (0.0..=11.0).contains(&omega) {
         glauber.set_omega(omega);
+    }
+    if let Some(path) = config {
+        glauber.apply_run_config(&RunConfig::from_file(path)?)?;
     }
 
     let name = format!("{}.root", glauber.str());
@@ -248,44 +265,63 @@ fn run_and_save_ntuple(
     // --- Write to ROOT file as a TTree ---
     // One basket per branch: like the single Parquet row group in run_save_parquet.rs,
     // this lets the compressor see each whole column at once.
-    let tree = Tree::new(
-        "glauber",
-        vec![
-            Branch::f32("Npart", npart),
-            Branch::f32("Ncoll", ncoll),
-            Branch::f32("Nhard", nhard),
-            Branch::f32("Nmpi", nmpi),
-            Branch::f32("B", b),
-            Branch::f32("BNN", bnn),
-            Branch::f32("Ncollpp", ncollpp),
-            Branch::f32("Ncollpn", ncollpn),
-            Branch::f32("Ncollnn", ncollnn),
-            Branch::f32("VarX", var_x),
-            Branch::f32("VarY", var_y),
-            Branch::f32("VarXY", var_xy),
-            Branch::f32("NpartA", npart_a),
-            Branch::f32("NpartB", npart_b),
-            Branch::f32("Npart0", npart0),
-            Branch::f32("NpartAn", npart_an),
-            Branch::f32("NpartBn", npart_bn),
-            Branch::f32("Npart0n", npart0n),
-            Branch::f32("AreaW", area_w),
-            Branch::f32("SpecA", spec_a),
-            Branch::f32("SpecB", spec_b),
-            Branch::f32("Weight", weight),
-            Branch::f32("Psi1", psi1),
-            Branch::f32("Ecc1", ecc1),
-            Branch::f32("Psi2", psi2),
-            Branch::f32("Ecc2", ecc2),
-            Branch::f32("Psi3", psi3),
-            Branch::f32("Ecc3", ecc3),
-            Branch::f32("Psi4", psi4),
-            Branch::f32("Ecc4", ecc4),
-            Branch::f32("Psi5", psi5),
-            Branch::f32("Ecc5", ecc5),
-        ],
-    );
-    tree.write_root(filename, COMPRESSION)?;
+    let mut branches = vec![
+        Branch::f32("Npart", npart),
+        Branch::f32("Ncoll", ncoll),
+        Branch::f32("Nhard", nhard),
+        Branch::f32("Nmpi", nmpi),
+        Branch::f32("B", b),
+        Branch::f32("BNN", bnn),
+        Branch::f32("Ncollpp", ncollpp),
+        Branch::f32("Ncollpn", ncollpn),
+        Branch::f32("Ncollnn", ncollnn),
+        Branch::f32("VarX", var_x),
+        Branch::f32("VarY", var_y),
+        Branch::f32("VarXY", var_xy),
+        Branch::f32("NpartA", npart_a),
+        Branch::f32("NpartB", npart_b),
+        Branch::f32("Npart0", npart0),
+        Branch::f32("NpartAn", npart_an),
+        Branch::f32("NpartBn", npart_bn),
+        Branch::f32("Npart0n", npart0n),
+        Branch::f32("AreaW", area_w),
+        Branch::f32("SpecA", spec_a),
+        Branch::f32("SpecB", spec_b),
+        Branch::f32("Weight", weight),
+        Branch::f32("Psi1", psi1),
+        Branch::f32("Ecc1", ecc1),
+        Branch::f32("Psi2", psi2),
+        Branch::f32("Ecc2", ecc2),
+        Branch::f32("Psi3", psi3),
+        Branch::f32("Ecc3", ecc3),
+        Branch::f32("Psi4", psi4),
+        Branch::f32("Ecc4", ecc4),
+        Branch::f32("Psi5", psi5),
+        Branch::f32("Ecc5", ecc5),
+    ];
+
+    match glauber.three_d() {
+        None => Tree::new("glauber", branches).write_root(filename, COMPRESSION)?,
+        Some(g3) => {
+            // 3D mode: extra branches, plus (with the eta_s profiles) a one-entry tree
+            // with the eta_s cell centers of the profile arrays
+            for (name, column) in output_columns(&events, g3) {
+                branches.push(match column {
+                    Column3D::Scalar(values) => Branch::f32(name, values),
+                    Column3D::Array(rows) => Branch::vec_f32(name, rows),
+                });
+            }
+            let mut writer = FileWriter::create(filename).put(Tree::new("glauber", branches));
+            if g3.params().eccentricity_eta {
+                let eta: Vec<f32> = g3.eta_grid().into_iter().map(|e| e as f32).collect();
+                writer = writer.put(Tree::new(
+                    "glauber3d_grid",
+                    vec![Branch::vec_f32("EtaS", vec![eta])],
+                ));
+            }
+            writer.write(COMPRESSION)?;
+        }
+    }
 
     println!();
     println!(
@@ -307,7 +343,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output) = parse_args()?;
+    let (nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output, config) =
+        parse_args()?;
 
     println!("=== Oxy-Glauber v{} ===", oxy_glauber::VERSION);
     println!("Simulation parameters:");
@@ -324,6 +361,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Output: {}",
         output.as_deref().unwrap_or("auto-generated")
     );
+    println!(
+        "  Run config: {}",
+        config.as_deref().unwrap_or("none (standard mode)")
+    );
     println!();
 
     let _events = run_and_save_ntuple(
@@ -337,6 +378,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         noded,
         seed,
         output.as_deref(),
+        config.as_deref(),
     )?;
 
     Ok(())

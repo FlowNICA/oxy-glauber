@@ -1,7 +1,11 @@
 // src/bin/run_save_parquet.rs
-use oxy_glauber::{TGlauberEvent, TGlauberMC};
-use parquet::basic::{Compression, Encoding, Type as PhysicalType, ZstdLevel};
+use oxy_glauber::glauber3d::output_columns;
+use oxy_glauber::{Column3D, RunConfig, TGlauberEvent, TGlauberMC};
+use parquet::basic::{
+    Compression, Encoding, LogicalType, Repetition, Type as PhysicalType, ZstdLevel,
+};
 use parquet::data_type::FloatType;
+use parquet::file::metadata::KeyValue;
 use parquet::file::properties::{WriterProperties, WriterPropertiesPtr};
 use parquet::file::writer::SerializedFileWriter;
 use parquet::schema::types::{Type as SchemaType, TypePtr};
@@ -44,6 +48,8 @@ fn print_usage() {
     );
     println!("  --seed VAL        Random seed (default: 42)");
     println!("  --output FILE     Output file name (default: auto-generated)");
+    println!("  --config FILE     Run configuration file (RON), e.g. config/run_3d.ron, which");
+    println!("                    toggles the 3D Glauber mode (default: none = standard mode)");
     println!("  --help            Print this help message");
     println!();
     println!("Note: If signn is negative, it is interpreted as beam energy in GeV");
@@ -67,6 +73,7 @@ fn parse_args() -> Result<
         f64,
         u64,
         Option<String>,
+        Option<String>,
     ),
     String,
 > {
@@ -85,6 +92,7 @@ fn parse_args() -> Result<
     let mut noded = -1.0;
     let mut seed = 42;
     let mut output = None;
+    let mut config = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -173,6 +181,13 @@ fn parse_args() -> Result<
                 }
                 output = Some(args[i].clone());
             }
+            "--config" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --config".to_string());
+                }
+                config = Some(args[i].clone());
+            }
             "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -185,21 +200,40 @@ fn parse_args() -> Result<
     }
 
     Ok((
-        nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output,
+        nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output, config,
     ))
 }
 
-/// Build the flat, all-REQUIRED-FLOAT Parquet schema shared by every branch.
-fn build_schema() -> TypePtr {
-    let fields: Vec<TypePtr> = COLUMNS
+/// Build the Parquet schema: a REQUIRED FLOAT per scalar column and, for the 3D mode's
+/// eta_s profiles, a standard 3-level LIST of REQUIRED FLOAT per array column.
+fn build_schema(columns: &[(String, Column3D)]) -> TypePtr {
+    let float = |name: &str, repetition: Repetition| -> TypePtr {
+        Arc::new(
+            SchemaType::primitive_type_builder(name, PhysicalType::FLOAT)
+                .with_repetition(repetition)
+                .build()
+                .expect("valid primitive type"),
+        )
+    };
+    let fields: Vec<TypePtr> = columns
         .iter()
-        .map(|name| {
-            Arc::new(
-                SchemaType::primitive_type_builder(name, PhysicalType::FLOAT)
-                    .with_repetition(parquet::basic::Repetition::REQUIRED)
+        .map(|(name, column)| match column {
+            Column3D::Scalar(_) => float(name, Repetition::REQUIRED),
+            Column3D::Array(_) => {
+                let list = SchemaType::group_type_builder("list")
+                    .with_repetition(Repetition::REPEATED)
+                    .with_fields(vec![float("element", Repetition::REQUIRED)])
                     .build()
-                    .expect("valid primitive type"),
-            )
+                    .expect("valid list type");
+                Arc::new(
+                    SchemaType::group_type_builder(name)
+                        .with_repetition(Repetition::REQUIRED)
+                        .with_logical_type(Some(LogicalType::List))
+                        .with_fields(vec![Arc::new(list)])
+                        .build()
+                        .expect("valid list column"),
+                )
+            }
         })
         .collect();
 
@@ -232,7 +266,9 @@ fn build_schema() -> TypePtr {
 /// ZSTD (see `ZSTD_LEVEL`) is the compression codec itself: decompression is fast
 /// regardless of the level used to compress, so it's a straightforward win over
 /// SNAPPY/GZIP/LZ4 for "smallest file, still fast to read".
-fn build_writer_properties() -> WriterPropertiesPtr {
+///
+/// `metadata` is stored as the file's key-value metadata.
+fn build_writer_properties(metadata: Option<Vec<KeyValue>>) -> WriterPropertiesPtr {
     Arc::new(
         WriterProperties::builder()
             .set_compression(Compression::ZSTD(
@@ -240,6 +276,7 @@ fn build_writer_properties() -> WriterPropertiesPtr {
             ))
             .set_dictionary_enabled(false)
             .set_encoding(Encoding::PLAIN)
+            .set_key_value_metadata(metadata)
             .build(),
     )
 }
@@ -257,6 +294,7 @@ fn run_and_save_parquet(
     noded: f64,
     _seed: u64,
     output_file: Option<&str>,
+    config: Option<&str>,
 ) -> Result<Vec<TGlauberEvent>, Box<dyn std::error::Error>> {
     let mut rng = rand::rng();
 
@@ -271,6 +309,9 @@ fn run_and_save_parquet(
     if (0.0..=11.0).contains(&omega) {
         glauber.set_omega(omega);
     }
+    if let Some(path) = config {
+        glauber.apply_run_config(&RunConfig::from_file(path)?)?;
+    }
 
     let name = format!("{}.parquet", glauber.str());
     let filename = output_file.unwrap_or(&name);
@@ -282,7 +323,7 @@ fn run_and_save_parquet(
 
     // --- Prepare data for writing: one Vec<f32> column per branch, same set/order
     // as run_save_ntuple.rs's ROOT tree branches ---
-    let columns: [Vec<f32>; 32] = [
+    let standard: [Vec<f32>; 32] = [
         events.iter().map(|e| e.npart).collect(),
         events.iter().map(|e| e.ncoll).collect(),
         events.iter().map(|e| e.nhard).collect(),
@@ -316,25 +357,55 @@ fn run_and_save_parquet(
         events.iter().map(|e| e.psi5).collect(),
         events.iter().map(|e| e.ecc5).collect(),
     ];
-    debug_assert_eq!(columns.len(), COLUMNS.len());
+    debug_assert_eq!(standard.len(), COLUMNS.len());
+    let mut columns: Vec<(String, Column3D)> = COLUMNS
+        .iter()
+        .zip(standard)
+        .map(|(name, values)| (name.to_string(), Column3D::Scalar(values)))
+        .collect();
+
+    // 3D mode: extra columns, and the eta_s cell centers of the eta_s profile arrays
+    // as key-value metadata
+    let mut metadata = None;
+    if let Some(g3) = glauber.three_d() {
+        columns.extend(output_columns(&events, g3));
+        if g3.params().eccentricity_eta {
+            let eta: Vec<String> =
+                g3.eta_grid().iter().map(|&e| format!("{}", e as f32)).collect();
+            metadata = Some(vec![KeyValue::new("EtaS".to_string(), eta.join(","))]);
+        }
+    }
 
     // --- Write to a Parquet file using the low-level (arrow-free) column writer API ---
     let file = File::create(filename)?;
-    let schema = build_schema();
-    let props = build_writer_properties();
+    let schema = build_schema(&columns);
+    let props = build_writer_properties(metadata);
 
     let mut writer = SerializedFileWriter::new(file, schema, props)?;
     // A single row group maximizes the amount of data zstd sees at once per column,
     // which improves the compression ratio; all columns are already fully buffered in
     // memory above, so there's no streaming benefit to splitting into several groups.
     let mut row_group_writer = writer.next_row_group()?;
-    for column in &columns {
+    for (_, column) in &columns {
         let mut col_writer = row_group_writer
             .next_column()?
             .expect("schema/column count mismatch");
-        col_writer
-            .typed::<FloatType>()
-            .write_batch(column, None, None)?;
+        let typed = col_writer.typed::<FloatType>();
+        match column {
+            Column3D::Scalar(values) => {
+                typed.write_batch(values, None, None)?;
+            }
+            Column3D::Array(rows) => {
+                // every element is defined (level 1); repetition level 0 starts a row
+                let values: Vec<f32> = rows.concat();
+                let def_levels = vec![1i16; values.len()];
+                let rep_levels: Vec<i16> = rows
+                    .iter()
+                    .flat_map(|row| (0..row.len()).map(|k| i16::from(k > 0)))
+                    .collect();
+                typed.write_batch(&values, Some(&def_levels), Some(&rep_levels))?;
+            }
+        }
         col_writer.close()?;
     }
     row_group_writer.close()?;
@@ -360,7 +431,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output) = parse_args()?;
+    let (nevents, sys_a, sys_b, signn, sigwidth, mind, omega, noded, seed, output, config) =
+        parse_args()?;
 
     println!("=== Oxy-Glauber v{} ===", oxy_glauber::VERSION);
     println!("Simulation parameters:");
@@ -377,6 +449,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Output: {}",
         output.as_deref().unwrap_or("auto-generated")
     );
+    println!(
+        "  Run config: {}",
+        config.as_deref().unwrap_or("none (standard mode)")
+    );
     println!();
 
     let _events = run_and_save_parquet(
@@ -390,6 +466,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         noded,
         seed,
         output.as_deref(),
+        config.as_deref(),
     )?;
 
     Ok(())

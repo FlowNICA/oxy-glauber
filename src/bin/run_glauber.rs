@@ -1,7 +1,7 @@
 // src/bin/run_glauber.rs
 use oxiroot::Compression;
 use oxiroot::tree::{Branch, Tree};
-use oxy_glauber::TGlauberMC;
+use oxy_glauber::{RunConfig, TGlauberMC};
 use std::env;
 
 fn print_usage() {
@@ -17,12 +17,29 @@ fn print_usage() {
     println!("  --bmax VAL        Maximum impact parameter in fm (default: 20.0)");
     println!("  --seed VAL        Random seed (default: 42)");
     println!("  --output FILE     Output file name (default: glauber_output.root)");
+    println!("  --config FILE     Run configuration file (RON), e.g. config/run_3d.ron, which");
+    println!("                    toggles the 3D Glauber mode (default: none = standard mode)");
     println!("  --help            Print this help message");
     println!();
     println!("Note: If signn is negative, it is interpreted as beam energy in GeV");
 }
 
-fn parse_args() -> Result<(i32, String, String, f64, f64, f64, f64, f64, u64, String), String> {
+fn parse_args() -> Result<
+    (
+        i32,
+        String,
+        String,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        u64,
+        String,
+        Option<String>,
+    ),
+    String,
+> {
     let args: Vec<String> = env::args().collect();
 
     let mut nevents = 1000;
@@ -35,6 +52,7 @@ fn parse_args() -> Result<(i32, String, String, f64, f64, f64, f64, f64, u64, St
     let mut bmax = 20.0;
     let mut seed = 42;
     let mut output = "glauber_output.root".to_string();
+    let mut config = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -123,6 +141,13 @@ fn parse_args() -> Result<(i32, String, String, f64, f64, f64, f64, f64, u64, St
                 }
                 output = args[i].clone();
             }
+            "--config" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --config".to_string());
+                }
+                config = Some(args[i].clone());
+            }
             "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -135,7 +160,7 @@ fn parse_args() -> Result<(i32, String, String, f64, f64, f64, f64, f64, u64, St
     }
 
     Ok((
-        nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output,
+        nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, seed, output, config,
     ))
 }
 
@@ -148,7 +173,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, _seed, output) = parse_args()?;
+    let (nevents, sys_a, sys_b, signn, mind, omega, bmin, bmax, _seed, output, config) =
+        parse_args()?;
 
     println!("=== Oxy-Glauber v{} ===", oxy_glauber::VERSION);
     println!("Simulation parameters:");
@@ -160,6 +186,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Omega: {}", omega);
     println!("  b range: {} - {} fm", bmin, bmax);
     println!("  Output: {}", output);
+    println!(
+        "  Run config: {}",
+        config.as_deref().unwrap_or("none (standard mode)")
+    );
     println!();
 
     let mut rng = rand::rng();
@@ -169,6 +199,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     glauber.set_omega(omega);
     glauber.set_bmin(bmin);
     glauber.set_bmax(bmax);
+    if let Some(path) = config.as_deref() {
+        glauber.apply_run_config(&RunConfig::from_file(path)?)?;
+    }
 
     println!("Running Glauber Monte Carlo for {}+{}...", sys_a, sys_b);
     println!("Generating {} events...", nevents);
