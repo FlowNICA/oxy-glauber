@@ -77,19 +77,21 @@ cargo run --release --bin run_save_ntuple -- \
     --output my_output.root
 ```
 
-### Run with energy instead of cross section (signn negative = √s_NN in GeV)
+### Run with energy instead of cross section (`--sqrtsnn`, √s_NN in GeV)
 ```bash
 cargo run --release --bin run_save_ntuple -- \
     --nevents 1000 \
-    --signn -5360  # 5.36 TeV
+    --sqrtsnn 5360  # 5.36 TeV
 ```
+`--sqrtsnn 5360` is the same as the older form `--signn -5360` (a negative `--signn` is
+read as √s_NN in GeV); `--signn` and `--sqrtsnn` can't be combined.
 
 ### Run at low energy with a fixed seed
 ```bash
 cargo run --release --bin run_save_ntuple -- \
     --nevents 1000 \
     --sysA Au --sysB Au \
-    --signn -2.4 \
+    --sqrtsnn 2.4 \
     --seed 123
 ```
 
@@ -139,6 +141,7 @@ accept the same option names, though a few defaults differ per binary:
 | `--sysA NAME`   | Name of nucleus A | Pbpnrw (Pb for `run_glauber`) |
 | `--sysB NAME`   | Name of nucleus B | Pbpnrw (Pb for `run_glauber`) |
 | `--signn VAL`   | σ_NN in mb (negative = √s_NN in GeV, must be ≥ 2.0223) | 68.0 |
+| `--sqrtsnn VAL` | √s_NN in GeV (≥ 2.0223), the cross sections are computed from it; alternative to `--signn`, the two can't be combined | - |
 | `--mind VAL`    | Minimum nucleon distance in fm | 0.4 |
 | `--omega VAL`   | Omega parameter for NN profile | 0.0/hard sphere for `run_save_ntuple`/`run_save_parquet`, 0.3/Gamma for `run_glauber`/`run_smear_ntuple` |
 | `--seed VAL`    | Random seed; the same seed reproduces the same output | 42 |
@@ -278,7 +281,7 @@ Deformed nuclei with `profile: DeformedBox` take `beta2`, `beta3`, `beta4` and t
 The file contains one configuration per line: `x y z` (fm) for each nucleon, optionally followed by an isospin column (`x y z isospin`, 1 = proton, 0 = neutron). Blank lines and `#` comments are ignored, relative paths are resolved against the working directory, and each event uses a randomly chosen configuration in a random orientation. The `He3`, `H3`, `He4`, `C` and `O` entries use this profile but have no file set yet, so they can't be used until one is added.
 
 # Energy-Dependent Cross Sections
-A negative `--signn` (or `xsect` in `TGlauberMC::new`) is read as √s_NN in GeV, and the cross sections are derived from it:
+With `--sqrtsnn` (or a negative `--signn`, or a negative `xsect` in `TGlauberMC::new`) the value is read as √s_NN in GeV, and the cross sections are derived from it:
 
 | √s_NN (GeV) | σ_NN | σ_NP |
 |-------------|------|------|
@@ -313,19 +316,21 @@ cargo run --release --bin run_save_ntuple -- --sysA Au --sysB Au --signn 42 --co
 (
     three_d: true,          // false = standard mode
     three_d_params: (
-        roots: 200.0,       // sqrt(s_NN) in GeV, sets the beam rapidity
+        roots: 200.0,       // sqrt(s_NN) in GeV, sets the beam rapidity (--sqrtsnn overrides it)
         // ... see config/run_3d.ron for all parameters and their defaults
     ),
 )
 ```
 [`config/run_3d.ron`](config/run_3d.ron) documents every parameter; all are optional and
-default to the values of 3dMCGlauber's `input` file. The nuclei are thrown as in the
-standard mode (from `data/nuclei.ron`). In the 3D mode:
+default to the values of 3dMCGlauber's `input` file. When the run is given an energy
+(`--sqrtsnn`, or a negative `--signn`), that energy replaces `roots`, so the beam
+rapidity always matches it; with `--signn` in mb, `roots` from the file is used. The
+nuclei are thrown as in the standard mode (from `data/nuclei.ron`). In the 3D mode:
 - **Collision criterion**: two nucleons collide with probability
   1 − exp(−σ_eff T_nn(b)), with T_nn the overlap of two Gaussian nucleons of width
   w = √(σ_NN/π)/√8 and σ_eff fixed so that the probability integrates to σ_NN. This
   replaces the black disk and the `--omega` NN profiles (cross-section fluctuations and
-  a separate σ_pn are not used either). σ_NN is the run's `--signn`, or 3dMCGlauber's
+  a separate σ_pn are not used either). σ_NN is the run's (from `--signn` or `--sqrtsnn`), or 3dMCGlauber's
   parameterization at `roots` with `sigma_nn_from_roots: true`.
 - **Collision cascade**: the nuclei are Lorentz-contracted, placed just apart along the
   beam axis (A moving in +z) and propagated; the collisions of the colliding pairs are

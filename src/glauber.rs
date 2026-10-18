@@ -907,6 +907,8 @@ pub struct TGlauberMC {
     config: GlauberConfig,
     /// Base seed for `run_parallel`; event `i` uses ChaCha8 stream `i` of this seed.
     seed: u64,
+    /// sqrt(s_NN) in GeV if the run was created from an energy (negative `xsect`)
+    sqrt_snn: Option<f64>,
 }
 
 impl TGlauberMC {
@@ -927,6 +929,7 @@ impl TGlauberMC {
         // overridden below when operating in energy mode (xsect<0).
         let mut sig_h = 129.4;
 
+        let sqrt_snn = (xsect < 0.0).then_some(-xsect);
         if xsect < 0.0 {
             let energy = -xsect;
             let (sig_nn, sig_np, sig_hard) = CrossSection::from_energy(energy)
@@ -1005,6 +1008,7 @@ impl TGlauberMC {
             three_d: None,
             config,
             seed: 42,
+            sqrt_snn,
         })
     }
 
@@ -1105,8 +1109,19 @@ impl TGlauberMC {
     /// Switch to the 3D Glauber mode (see `glauber3d`). Unless
     /// `params.sigma_nn_from_roots` is set, it uses the sigma_NN this run was created
     /// with; the NN profile (`set_omega`), cross-section fluctuations and separate pn
-    /// cross section are not used in this mode.
-    pub fn set_three_d(&mut self, params: Glauber3DParams) -> Result<(), ConfigError> {
+    /// cross section are not used in this mode. If the run was created from an energy
+    /// (negative `xsect`), that energy replaces `params.roots`.
+    pub fn set_three_d(&mut self, mut params: Glauber3DParams) -> Result<(), ConfigError> {
+        // A run created from an energy collides at that energy: it sets the beam rapidity
+        if let Some(energy) = self.sqrt_snn {
+            if params.roots != energy {
+                println!(
+                    "3D Glauber mode: roots={} GeV of the run configuration replaced by the run's sqrt(s_NN)={} GeV",
+                    params.roots, energy
+                );
+            }
+            params.roots = energy;
+        }
         let g3 = Glauber3D::new(params, self.xsect)?;
         println!(
             "3D Glauber mode: sqrt(s)={} GeV, y_beam={:.3}, sigma_NN={:.2} mb, nucleon width={:.3} fm, sigma_eff={:.3} fm^2",
@@ -1118,12 +1133,19 @@ impl TGlauberMC {
         );
         let at_roots = crate::glauber3d::sigma_nn_inel(g3.params().roots);
         if (g3.sigma_nn() / at_roots - 1.0).abs() > 0.1 {
+            // roots is the run's own energy when it was created from one, so only the
+            // two sigma_NN(sqrt(s)) parameterizations can differ then
+            let hint = if self.sqrt_snn.is_some() {
+                "use `sigma_nn_from_roots: true` for 3dMCGlauber's value"
+            } else {
+                "set `roots` to the collision energy or use `sigma_nn_from_roots: true`"
+            };
             println!(
-                "Note: sigma_NN={:.1} mb differs from 3dMCGlauber's {:.1} mb at sqrt(s)={} GeV; \
-                 set `roots` to the collision energy or use `sigma_nn_from_roots: true`",
+                "Note: sigma_NN={:.1} mb differs from 3dMCGlauber's {:.1} mb at sqrt(s)={} GeV; {}",
                 g3.sigma_nn(),
                 at_roots,
-                g3.params().roots
+                g3.params().roots,
+                hint
             );
         }
         self.three_d = Some(Arc::new(g3));

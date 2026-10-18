@@ -100,3 +100,17 @@ fn elliptic_overlap_in_mid_central_collisions() {
         "<eps_2>: b=0 {central:.3}, b=8 {mid:.3}"
     );
 }
+
+#[test]
+fn energy_runs_set_roots() {
+    // a run created from sqrt(s_NN) (negative xsect) collides at that energy
+    let mut glauber = TGlauberMC::new("Au", "Au", -2.4, 0.0, 0.0).unwrap();
+    glauber.set_three_d(Glauber3DParams { roots: 200.0, ..Default::default() }).unwrap();
+    let g3 = glauber.three_d().unwrap();
+    assert_eq!(g3.params().roots, 2.4);
+    assert!((g3.ybeam() - (2.4 / (2.0 * M_PROTON)).acosh()).abs() < 1e-12);
+
+    // a run created from a cross section keeps the configured roots
+    let glauber = au_au_3d(Glauber3DParams { roots: 62.4, ..Default::default() });
+    assert_eq!(glauber.three_d().unwrap().params().roots, 62.4);
+}

@@ -32,6 +32,8 @@ fn print_usage() {
     println!("  --sysA NAME       Name of nucleus A (default: Pbpnrw)");
     println!("  --sysB NAME       Name of nucleus B (default: Pbpnrw)");
     println!("  --signn VAL       Nucleon-nucleon cross section in mb (default: 68.0)");
+    println!("  --sqrtsnn VAL     Collision energy sqrt(s_NN) in GeV, instead of --signn");
+    println!("                    (the cross sections are then computed from it)");
     println!("  --sigwidth VAL    Standard deviation of NN cross section (default: -1)");
     println!("  --mind VAL        Minimum distance between nucleons in fm (default: 0.4)");
     println!("  --omega VAL       Omega parameter for NN profile (default: 0.0)");
@@ -44,7 +46,8 @@ fn print_usage() {
     println!("                    toggles the 3D Glauber mode (default: none = standard mode)");
     println!("  --help            Print this help message");
     println!();
-    println!("Note: If signn is negative, it is interpreted as beam energy in GeV");
+    println!("Note: use either --signn or --sqrtsnn; a negative --signn is also read as");
+    println!("      sqrt(s_NN) in GeV");
 }
 
 fn parse_args() -> Result<
@@ -69,6 +72,8 @@ fn parse_args() -> Result<
     let mut sys_a = "Pbpnrw".to_string();
     let mut sys_b = "Pbpnrw".to_string();
     let mut signn = 68.0;
+    let mut signn_given = false;
+    let mut sqrtsnn: Option<f64> = None;
     let mut sigwidth = -1.0;
     let mut mind = 0.4;
     // Matches C++ runAndSaveNtuple's default (omega=0.0 means no NN profile - pure
@@ -114,6 +119,20 @@ fn parse_args() -> Result<
                 signn = args[i]
                     .parse()
                     .map_err(|_| "Invalid value for --signn".to_string())?;
+                signn_given = true;
+            }
+            "--sqrtsnn" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err("Missing value for --sqrtsnn".to_string());
+                }
+                let energy: f64 = args[i]
+                    .parse()
+                    .map_err(|_| "Invalid value for --sqrtsnn".to_string())?;
+                if !(energy > 0.0) {
+                    return Err("--sqrtsnn must be a positive energy in GeV".to_string());
+                }
+                sqrtsnn = Some(energy);
             }
             "--sigwidth" => {
                 i += 1;
@@ -183,6 +202,14 @@ fn parse_args() -> Result<
             }
         }
         i += 1;
+    }
+
+    // --sqrtsnn selects the energy mode, which TGlauberMC takes as a negative xsect
+    if let Some(energy) = sqrtsnn {
+        if signn_given {
+            return Err("--signn and --sqrtsnn are mutually exclusive, use only one".to_string());
+        }
+        signn = -energy;
     }
 
     Ok((
@@ -354,7 +381,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Events: {}", nevents);
     println!("  Nucleus A: {}", sys_a);
     println!("  Nucleus B: {}", sys_b);
-    println!("  σ_NN: {} mb", signn);
+    if signn < 0.0 {
+        println!("  √s_NN: {} GeV", -signn);
+    } else {
+        println!("  σ_NN: {} mb", signn);
+    }
     println!("  σ width: {} mb", sigwidth);
     println!("  Min distance: {} fm", mind);
     println!("  Omega: {}", omega);

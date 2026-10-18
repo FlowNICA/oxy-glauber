@@ -20,7 +20,8 @@
 (
     three_d: true,
     three_d_params: (
-        // Collision energy sqrt(s_NN) in GeV; sets the beam rapidity
+        // Collision energy sqrt(s_NN) in GeV; sets the beam rapidity. Replaced by the
+        // run's energy when it is given with --sqrtsnn (or a negative --signn)
         roots: 200.0,
         // false: use the run's sigma_NN (--signn); true: 3dMCGlauber's parameterization
         // of the inelastic sigma_NN at `roots` (40.8 mb at 200 GeV, 67.6 mb at 5.02 TeV)
