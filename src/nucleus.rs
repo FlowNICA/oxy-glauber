@@ -21,6 +21,11 @@ pub enum NucleusError {
     Config { name: String, msg: String },
     #[error("failed to read nucleon configurations from '{path}': {msg}")]
     ConfigFile { path: String, msg: String },
+    #[error(
+        "sqrt(s_NN)={0} GeV is below {min} GeV, the lowest energy with a known cross section",
+        min = crate::cross_section::SQRT_S_MIN
+    )]
+    EnergyOutOfRange(f64),
 }
 
 /// One entry of `data/nuclei.ron`
@@ -578,6 +583,36 @@ impl TGlauNucleus {
     /// Generate spherical coordinates for a nucleon - returns (r, phi, theta) with theta as polar angle.
     /// cos(theta) is sampled uniformly in [-1, 1] so the angular distribution is isotropic,
     /// matching McGlauber's `ctheta = 2*Rndm()-1; theta = ACos(ctheta)`.
+    /// Surface radius R(theta, phi) of the box-sampled profiles, matching the fF=5/fF=7
+    /// branch of `TGlauNucleus::ThrowNucleons`. For `DeformedBox`, a nonzero `gamma` makes
+    /// the beta2 term triaxial: Y20 -> cos(gamma)*Y20 + sin(gamma)*sqrt(15/(64pi))*sin^2(theta)*cos(2phi).
+    fn box_surface_radius(&self, theta: f64, phi: f64) -> f64 {
+        let ct = theta.cos();
+        if self.profile_type == DensityProfile::Ellipsoid {
+            return self.r + self.beta2 * ct * ct;
+        }
+        let mut r_def = self.r;
+        if self.beta2 != 0.0 {
+            // sph_legendre(2,0,theta) = sqrt(5/(16*pi)) * (3cos^2(theta)-1)
+            let y20 = (3.0 * ct * ct - 1.0) * 0.315;
+            let b2 = if self.gamma != 0.0 {
+                let v2 = (15.0 / 64.0 / PI).sqrt() * theta.sin().powi(2) * (2.0 * phi).cos();
+                self.gamma.cos() * y20 + self.gamma.sin() * v2
+            } else {
+                y20
+            };
+            r_def += self.r * self.beta2 * b2;
+        }
+        if self.beta3 != 0.0 {
+            // sph_legendre(3,0,theta) = sqrt(7/(16*pi)) * (5cos^3(theta)-3cos(theta))
+            r_def += self.r * self.beta3 * (5.0 * ct.powi(3) - 3.0 * ct) * 0.373176;
+        }
+        if self.beta4 != 0.0 {
+            r_def += self.r * self.beta4 * (35.0 * ct.powi(4) - 30.0 * ct * ct + 3.0) * 0.105;
+        }
+        r_def
+    }
+
     fn generate_spherical_coordinates<R: Rng>(
         &mut self,
         rng: &mut R,
@@ -667,31 +702,7 @@ impl TGlauNucleus {
                     let z = self.max_r * (2.0 * rng.random::<f64>() - 1.0);
                     let r = (x * x + y * y + z * z).sqrt();
                     let theta = (z / r).acos();
-
-                    let r_theta = if self.profile_type == DensityProfile::Ellipsoid {
-                        self.r + self.beta2 * theta.cos().powi(2)
-                    } else {
-                        // DeformedBox with beta2, beta3, beta4
-                        let mut r_def = self.r;
-                        if self.beta2 != 0.0 {
-                            r_def +=
-                                self.r * self.beta2 * (3.0 * theta.cos().powi(2) - 1.0) * 0.315;
-                        }
-                        if self.beta3 != 0.0 {
-                            // sph_legendre(3,0,theta) = sqrt(7/(4*pi)) * (5cos^3(theta)-3cos(theta))/2
-                            r_def += self.r
-                                * self.beta3
-                                * (5.0 * theta.cos().powi(3) - 3.0 * theta.cos())
-                                * 0.373176;
-                        }
-                        if self.beta4 != 0.0 {
-                            r_def += self.r
-                                * self.beta4
-                                * (35.0 * theta.cos().powi(4) - 30.0 * theta.cos().powi(2) + 3.0)
-                                * 0.105;
-                        }
-                        r_def
-                    };
+                    let r_theta = self.box_surface_radius(theta, y.atan2(x));
 
                     let prob = (1.0 + self.w * (r / r_theta).powi(2))
                         / (1.0 + ((r - r_theta) / self.a).exp());
@@ -948,28 +959,7 @@ impl TGlauNucleus {
                     continue;
                 }
                 let theta = (z / r).acos();
-
-                let r_theta = if self.profile_type == DensityProfile::Ellipsoid {
-                    self.r + self.beta2 * theta.cos().powi(2)
-                } else {
-                    let mut r_def = self.r;
-                    if self.beta2 != 0.0 {
-                        r_def += self.r * self.beta2 * (3.0 * theta.cos().powi(2) - 1.0) * 0.315;
-                    }
-                    if self.beta3 != 0.0 {
-                        r_def += self.r
-                            * self.beta3
-                            * (5.0 * theta.cos().powi(3) - 3.0 * theta.cos())
-                            * 0.373176;
-                    }
-                    if self.beta4 != 0.0 {
-                        r_def += self.r
-                            * self.beta4
-                            * (35.0 * theta.cos().powi(4) - 30.0 * theta.cos().powi(2) + 3.0)
-                            * 0.105;
-                    }
-                    r_def
-                };
+                let r_theta = self.box_surface_radius(theta, y.atan2(x));
 
                 let prob = (1.0 + self.w * (r / r_theta).powi(2))
                     / (1.0 + ((r - r_theta) / self.a).exp());
@@ -1196,5 +1186,21 @@ mod tests {
             TGlauNucleus::new("NotANucleus"),
             Err(NucleusError::Unknown(name)) if name == "NotANucleus"
         ));
+    }
+
+    #[test]
+    fn gamma_makes_deformed_box_triaxial() {
+        let mut nucleus = TGlauNucleus::new("NeTr3").unwrap();
+        assert_eq!(nucleus.profile_type, DensityProfile::DeformedBox);
+        let theta = PI / 2.0;
+        // gamma = 0: axially symmetric, no phi dependence
+        assert_eq!(
+            nucleus.box_surface_radius(theta, 0.0),
+            nucleus.box_surface_radius(theta, PI / 2.0)
+        );
+        nucleus.gamma = PI / 6.0;
+        assert!(
+            nucleus.box_surface_radius(theta, 0.0) > nucleus.box_surface_radius(theta, PI / 2.0)
+        );
     }
 }
